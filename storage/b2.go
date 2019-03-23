@@ -2,7 +2,6 @@ package storage
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -51,12 +50,11 @@ func NewB2(acctId, appKey, bucket, url string) (utahfs.ObjectStorage, error) {
 	return &b2{conn, bucket, url}, nil
 }
 
-func (b *b2) Get(ctx context.Context, key string) ([]byte, error) {
+func (b *b2) Get(key string) ([]byte, error) {
 	req, err := http.NewRequest("GET", fmt.Sprintf("%v/%v", b.url, key), nil)
 	if err != nil {
 		return nil, err
 	}
-	req = req.WithContext(ctx)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -72,7 +70,7 @@ func (b *b2) Get(ctx context.Context, key string) ([]byte, error) {
 	return ioutil.ReadAll(resp.Body)
 }
 
-func (b *b2) Set(ctx context.Context, key string, data []byte) error {
+func (b *b2) Set(key string, data []byte) error {
 	meta := make(map[string]string)
 	buff := bytes.NewBuffer(data)
 
@@ -87,7 +85,7 @@ func (b *b2) Set(ctx context.Context, key string, data []byte) error {
 	return nil
 }
 
-func (b *b2) Delete(ctx context.Context, key string) error {
+func (b *b2) Delete(key string) error {
 	bucket, err := b.conn.Bucket(b.bucket)
 	if err != nil {
 		return err
