@@ -1,0 +1,11 @@
+[[constraint]]
+  branch = "master"
+  name = "github.com/billziss-gh/cgofuse"
+
+[[constraint]]
+  branch = "master"
+  name = "gopkg.in/kothar/go-backblaze.v0"
+
+[prune]
+  go-tests = true
+  unused-packages = true
