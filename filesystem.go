@@ -71,7 +71,7 @@ func newNode(dev uint64, ino uint64, mode uint32, uid uint32, gid uint32) *node_
 	return &out
 }
 
-type FS struct {
+type fileSystem struct {
 	fuse.FileSystemBase
 
 	mu      sync.Mutex
@@ -80,35 +80,35 @@ type FS struct {
 	openmap map[uint64]*node_t
 }
 
-func New() *FS {
-	fs := &FS{}
-	fs.ino++
-	fs.root = newNode(0, fs.ino, fuse.S_IFDIR|00777, 0, 0)
-	fs.openmap = make(map[uint64]*node_t)
-	return fs
-}
+// func new() *fileSystem {
+// 	fs := &fileSystem{}
+// 	fs.ino++
+// 	fs.root = newNode(0, fs.ino, fuse.S_IFDIR|00777, 0, 0)
+// 	fs.openmap = make(map[uint64]*node_t)
+// 	return fs
+// }
 
-func (fs *FS) Mknod(path string, mode uint32, dev uint64) (errc int) {
+func (fs *fileSystem) Mknod(path string, mode uint32, dev uint64) (errc int) {
 	defer fs.synchronize()()
 	return fs.makeNode(path, mode, dev, nil)
 }
 
-func (fs *FS) Mkdir(path string, mode uint32) (errc int) {
+func (fs *fileSystem) Mkdir(path string, mode uint32) (errc int) {
 	defer fs.synchronize()()
 	return fs.makeNode(path, fuse.S_IFDIR|(mode&07777), 0, nil)
 }
 
-func (fs *FS) Unlink(path string) (errc int) {
+func (fs *fileSystem) Unlink(path string) (errc int) {
 	defer fs.synchronize()()
 	return fs.removeNode(path, false)
 }
 
-func (fs *FS) Rmdir(path string) (errc int) {
+func (fs *fileSystem) Rmdir(path string) (errc int) {
 	defer fs.synchronize()()
 	return fs.removeNode(path, true)
 }
 
-func (fs *FS) Link(oldpath string, newpath string) (errc int) {
+func (fs *fileSystem) Link(oldpath string, newpath string) (errc int) {
 	defer fs.synchronize()()
 	_, oldnode, _ := fs.lookupNode(oldpath, nil)
 	if oldnode == nil {
@@ -129,12 +129,12 @@ func (fs *FS) Link(oldpath string, newpath string) (errc int) {
 	return 0
 }
 
-func (fs *FS) Symlink(target string, newpath string) (errc int) {
+func (fs *fileSystem) Symlink(target string, newpath string) (errc int) {
 	defer fs.synchronize()()
 	return fs.makeNode(newpath, fuse.S_IFLNK|00777, 0, []byte(target))
 }
 
-func (fs *FS) Readlink(path string) (errc int, target string) {
+func (fs *fileSystem) Readlink(path string) (errc int, target string) {
 	defer fs.synchronize()()
 	_, node, _ := fs.lookupNode(path, nil)
 	if node == nil {
@@ -145,7 +145,7 @@ func (fs *FS) Readlink(path string) (errc int, target string) {
 	return 0, string(node.data)
 }
 
-func (fs *FS) Rename(oldpath string, newpath string) (errc int) {
+func (fs *fileSystem) Rename(oldpath string, newpath string) (errc int) {
 	defer fs.synchronize()()
 	oldprnt, oldnode, oldname := fs.lookupNode(oldpath, nil)
 	if oldnode == nil {
@@ -171,7 +171,7 @@ func (fs *FS) Rename(oldpath string, newpath string) (errc int) {
 	return 0
 }
 
-func (fs *FS) Chmod(path string, mode uint32) (errc int) {
+func (fs *fileSystem) Chmod(path string, mode uint32) (errc int) {
 	defer fs.synchronize()()
 	_, node, _ := fs.lookupNode(path, nil)
 	if node == nil {
@@ -182,7 +182,7 @@ func (fs *FS) Chmod(path string, mode uint32) (errc int) {
 	return 0
 }
 
-func (fs *FS) Chown(path string, uid uint32, gid uint32) (errc int) {
+func (fs *fileSystem) Chown(path string, uid uint32, gid uint32) (errc int) {
 	defer fs.synchronize()()
 	_, node, _ := fs.lookupNode(path, nil)
 	if node == nil {
@@ -198,7 +198,7 @@ func (fs *FS) Chown(path string, uid uint32, gid uint32) (errc int) {
 	return 0
 }
 
-func (fs *FS) Utimens(path string, tmsp []fuse.Timespec) (errc int) {
+func (fs *fileSystem) Utimens(path string, tmsp []fuse.Timespec) (errc int) {
 	defer fs.synchronize()()
 	_, node, _ := fs.lookupNode(path, nil)
 	if node == nil {
@@ -215,12 +215,12 @@ func (fs *FS) Utimens(path string, tmsp []fuse.Timespec) (errc int) {
 	return 0
 }
 
-func (fs *FS) Open(path string, flags int) (errc int, fh uint64) {
+func (fs *fileSystem) Open(path string, flags int) (errc int, fh uint64) {
 	defer fs.synchronize()()
 	return fs.openNode(path, false)
 }
 
-func (fs *FS) Getattr(path string, stat *fuse.Stat_t, fh uint64) (errc int) {
+func (fs *fileSystem) Getattr(path string, stat *fuse.Stat_t, fh uint64) (errc int) {
 	defer fs.synchronize()()
 	node := fs.getNode(path, fh)
 	if node == nil {
@@ -230,7 +230,7 @@ func (fs *FS) Getattr(path string, stat *fuse.Stat_t, fh uint64) (errc int) {
 	return 0
 }
 
-func (fs *FS) Truncate(path string, size int64, fh uint64) (errc int) {
+func (fs *fileSystem) Truncate(path string, size int64, fh uint64) (errc int) {
 	defer fs.synchronize()()
 	node := fs.getNode(path, fh)
 	if node == nil {
@@ -244,7 +244,7 @@ func (fs *FS) Truncate(path string, size int64, fh uint64) (errc int) {
 	return 0
 }
 
-func (fs *FS) Read(path string, buff []byte, ofst int64, fh uint64) (n int) {
+func (fs *fileSystem) Read(path string, buff []byte, ofst int64, fh uint64) (n int) {
 	defer fs.synchronize()()
 	node := fs.getNode(path, fh)
 	if node == nil {
@@ -262,7 +262,7 @@ func (fs *FS) Read(path string, buff []byte, ofst int64, fh uint64) (n int) {
 	return
 }
 
-func (fs *FS) Write(path string, buff []byte, ofst int64, fh uint64) (n int) {
+func (fs *fileSystem) Write(path string, buff []byte, ofst int64, fh uint64) (n int) {
 	defer fs.synchronize()()
 	node := fs.getNode(path, fh)
 	if node == nil {
@@ -280,17 +280,17 @@ func (fs *FS) Write(path string, buff []byte, ofst int64, fh uint64) (n int) {
 	return
 }
 
-func (fs *FS) Release(path string, fh uint64) (errc int) {
+func (fs *fileSystem) Release(path string, fh uint64) (errc int) {
 	defer fs.synchronize()()
 	return fs.closeNode(fh)
 }
 
-func (fs *FS) Opendir(path string) (errc int, fh uint64) {
+func (fs *fileSystem) Opendir(path string) (errc int, fh uint64) {
 	defer fs.synchronize()()
 	return fs.openNode(path, true)
 }
 
-func (fs *FS) Readdir(path string, fill func(name string, stat *fuse.Stat_t, ofst int64) bool, ofst int64, fh uint64) (errc int) {
+func (fs *fileSystem) Readdir(path string, fill func(name string, stat *fuse.Stat_t, ofst int64) bool, ofst int64, fh uint64) (errc int) {
 	defer fs.synchronize()()
 	node := fs.openmap[fh]
 	fill(".", &node.stat, 0)
@@ -303,12 +303,12 @@ func (fs *FS) Readdir(path string, fill func(name string, stat *fuse.Stat_t, ofs
 	return 0
 }
 
-func (fs *FS) Releasedir(path string, fh uint64) (errc int) {
+func (fs *fileSystem) Releasedir(path string, fh uint64) (errc int) {
 	defer fs.synchronize()()
 	return fs.closeNode(fh)
 }
 
-func (fs *FS) Setxattr(path string, name string, value []byte, flags int) (errc int) {
+func (fs *fileSystem) Setxattr(path string, name string, value []byte, flags int) (errc int) {
 	defer fs.synchronize()()
 	_, node, _ := fs.lookupNode(path, nil)
 	if node == nil {
@@ -334,7 +334,7 @@ func (fs *FS) Setxattr(path string, name string, value []byte, flags int) (errc 
 	return 0
 }
 
-func (fs *FS) Getxattr(path string, name string) (errc int, xatr []byte) {
+func (fs *fileSystem) Getxattr(path string, name string) (errc int, xatr []byte) {
 	defer fs.synchronize()()
 	_, node, _ := fs.lookupNode(path, nil)
 	if node == nil {
@@ -349,7 +349,7 @@ func (fs *FS) Getxattr(path string, name string) (errc int, xatr []byte) {
 	return 0, xatr
 }
 
-func (fs *FS) Removexattr(path string, name string) (errc int) {
+func (fs *fileSystem) Removexattr(path string, name string) (errc int) {
 	defer fs.synchronize()()
 	_, node, _ := fs.lookupNode(path, nil)
 	if node == nil {
@@ -364,7 +364,7 @@ func (fs *FS) Removexattr(path string, name string) (errc int) {
 	return 0
 }
 
-func (fs *FS) Listxattr(path string, fill func(name string) bool) (errc int) {
+func (fs *fileSystem) Listxattr(path string, fill func(name string) bool) (errc int) {
 	defer fs.synchronize()()
 	_, node, _ := fs.lookupNode(path, nil)
 	if node == nil {
@@ -378,7 +378,7 @@ func (fs *FS) Listxattr(path string, fill func(name string) bool) (errc int) {
 	return 0
 }
 
-func (fs *FS) Chflags(path string, flags uint32) (errc int) {
+func (fs *fileSystem) Chflags(path string, flags uint32) (errc int) {
 	defer fs.synchronize()()
 	_, node, _ := fs.lookupNode(path, nil)
 	if node == nil {
@@ -389,7 +389,7 @@ func (fs *FS) Chflags(path string, flags uint32) (errc int) {
 	return 0
 }
 
-func (fs *FS) Setcrtime(path string, tmsp fuse.Timespec) (errc int) {
+func (fs *fileSystem) Setcrtime(path string, tmsp fuse.Timespec) (errc int) {
 	defer fs.synchronize()()
 	_, node, _ := fs.lookupNode(path, nil)
 	if node == nil {
@@ -400,7 +400,7 @@ func (fs *FS) Setcrtime(path string, tmsp fuse.Timespec) (errc int) {
 	return 0
 }
 
-func (fs *FS) Setchgtime(path string, tmsp fuse.Timespec) (errc int) {
+func (fs *fileSystem) Setchgtime(path string, tmsp fuse.Timespec) (errc int) {
 	defer fs.synchronize()()
 	_, node, _ := fs.lookupNode(path, nil)
 	if node == nil {
@@ -410,7 +410,7 @@ func (fs *FS) Setchgtime(path string, tmsp fuse.Timespec) (errc int) {
 	return 0
 }
 
-func (fs *FS) lookupNode(path string, ancestor *node_t) (prnt, node *node_t, name string) {
+func (fs *fileSystem) lookupNode(path string, ancestor *node_t) (prnt, node *node_t, name string) {
 	prnt, node, name = fs.root, fs.root, ""
 
 	for _, c := range split(path) {
@@ -429,7 +429,7 @@ func (fs *FS) lookupNode(path string, ancestor *node_t) (prnt, node *node_t, nam
 	return
 }
 
-func (fs *FS) makeNode(path string, mode uint32, dev uint64, data []byte) int {
+func (fs *fileSystem) makeNode(path string, mode uint32, dev uint64, data []byte) int {
 	prnt, node, name := fs.lookupNode(path, nil)
 	if prnt == nil {
 		return -fuse.ENOENT
@@ -450,7 +450,7 @@ func (fs *FS) makeNode(path string, mode uint32, dev uint64, data []byte) int {
 	return 0
 }
 
-func (fs *FS) removeNode(path string, dir bool) int {
+func (fs *fileSystem) removeNode(path string, dir bool) int {
 	prnt, node, name := fs.lookupNode(path, nil)
 	if node == nil {
 		return -fuse.ENOENT
@@ -458,7 +458,7 @@ func (fs *FS) removeNode(path string, dir bool) int {
 		return -fuse.EISDIR
 	} else if dir && node.stat.Mode&fuse.S_IFMT != fuse.S_IFDIR {
 		return -fuse.ENOTDIR
-	} else if len(node.chld) >= 0 {
+	} else if len(node.chld) > 0 {
 		return -fuse.ENOTEMPTY
 	}
 	node.stat.Nlink--
@@ -470,7 +470,7 @@ func (fs *FS) removeNode(path string, dir bool) int {
 	return 0
 }
 
-func (fs *FS) openNode(path string, dir bool) (int, uint64) {
+func (fs *fileSystem) openNode(path string, dir bool) (int, uint64) {
 	_, node, _ := fs.lookupNode(path, nil)
 	if node == nil {
 		return -fuse.ENOENT, ^uint64(0)
@@ -486,7 +486,7 @@ func (fs *FS) openNode(path string, dir bool) (int, uint64) {
 	return 0, node.stat.Ino
 }
 
-func (fs *FS) closeNode(fh uint64) int {
+func (fs *fileSystem) closeNode(fh uint64) int {
 	node := fs.openmap[fh]
 	node.opencnt--
 	if node.opencnt == 0 {
@@ -495,7 +495,7 @@ func (fs *FS) closeNode(fh uint64) int {
 	return 0
 }
 
-func (fs *FS) getNode(path string, fh uint64) *node_t {
+func (fs *fileSystem) getNode(path string, fh uint64) *node_t {
 	if fh == ^uint64(0) {
 		_, node, _ := fs.lookupNode(path, nil)
 		return node
@@ -504,7 +504,7 @@ func (fs *FS) getNode(path string, fh uint64) *node_t {
 	}
 }
 
-func (fs *FS) synchronize() func() {
+func (fs *fileSystem) synchronize() func() {
 	fs.mu.Lock()
 	return func() {
 		fs.mu.Unlock()
