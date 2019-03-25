@@ -1,7 +1,6 @@
 package utahfs
 
 import (
-	"encoding/binary"
 	"fmt"
 	"io"
 )
@@ -45,11 +44,11 @@ func (bs *blockStorage) allocate() (uint32, error) {
 
 	data, err := bs.store.Get(fmt.Sprintf("%x", bs.trash))
 	if err != nil {
-		return nilPtr, fmt.Errorf("failed to load block %x: %v", ptr, err)
+		return nilPtr, fmt.Errorf("failed to load block %x: %v", bs.trash, err)
 	}
 	b, err := parseBlock(data)
 	if err != nil {
-		return nilPtr, fmt.Errorf("failed to parse block %x: %v", ptr, err)
+		return nilPtr, fmt.Errorf("failed to parse block %x: %v", bs.trash, err)
 	}
 
 	trash := bs.trash
@@ -62,7 +61,7 @@ func (bs *blockStorage) allocate() (uint32, error) {
 func (bs *blockStorage) Create() (uint32, *blockFile, error) {
 	ptr, err := bs.allocate()
 	if err != nil {
-		return
+		return nilPtr, nil, err
 	}
 
 	ptrs := make([]uint32, numPtrs)
@@ -88,7 +87,7 @@ func (bs *blockStorage) Create() (uint32, *blockFile, error) {
 	return ptr, bf, nil
 }
 
-func (bs *blockStorage) Open(ptr uint64) (*blockFile, error) {
+func (bs *blockStorage) Open(ptr uint32) (*blockFile, error) {
 	bf := &blockFile{
 		parent: bs,
 
@@ -124,7 +123,7 @@ type blockFile struct {
 
 // persist saves any changes to the current node to the data storage backend.
 func (bf *blockFile) persist() error {
-	return bf.parent.Set(fmt.Sprintf("%x", bf.ptr), bf.curr.Marshal())
+	return bf.parent.store.Set(fmt.Sprintf("%x", bf.ptr), bf.curr.Marshal())
 }
 
 // load pulls the block at `ptr` into memory. `pos` is our new position in the
@@ -139,17 +138,17 @@ func (bf *blockFile) load(ptr uint32, pos int64) error {
 		return fmt.Errorf("failed to parse block %x: %v", ptr, err)
 	}
 
-	b.pos = pos
-	b.idx = pos / dataSize
-	b.ptr = ptr
-	b.curr = curr
+	bf.pos = pos
+	bf.idx = pos / dataSize
+	bf.ptr = ptr
+	bf.curr = curr
 
 	return nil
 }
 
 func (bf *blockFile) Read(p []byte) (int, error) {
 	n, err := bf.read(p)
-	bf.pos += n
+	bf.pos += int64(n)
 	return n, err
 }
 
@@ -173,7 +172,7 @@ func (bf *blockFile) readAt(p []byte, offset int64) (int, error) {
 		return 0, errEndOfBlock
 	} else if offset < 0 || offset > dataSize {
 		return 0, errInvalidOffset
-	} else if offset > len(bf.curr.data) {
+	} else if offset >= int64(len(bf.curr.data)) {
 		return 0, io.EOF
 	}
 
@@ -185,10 +184,10 @@ func (bf *blockFile) Write(p []byte) (int, error) {
 	n := 0
 
 	for n < len(p) {
-		m, err := bf.write(p)
+		m, err := bf.write(p[n:])
 
 		n += m
-		bf.pos += m
+		bf.pos += int64(m)
 		if bf.pos > bf.size {
 			bf.size = bf.pos
 		}
@@ -295,7 +294,7 @@ func (bf *blockFile) Seek(offset int64, whence int) (int64, error) {
 	} else if offset > bf.size {
 		return -1, fmt.Errorf("cannot seek past end of file")
 	}
-	bf.pos = bf.pos / dataSize * dataSize
+	bf.pos = bf.idx * dataSize
 
 	// Follow the skiplist.
 	if offset < bf.pos {
@@ -348,14 +347,14 @@ type block struct {
 }
 
 func parseBlock(raw []byte) (*block, error) {
-	if len(raw) != blockSize {
+	if int64(len(raw)) != blockSize {
 		return nil, fmt.Errorf("unexpected size: %v != %v", len(raw), blockSize)
 	}
 
 	// Read pointers.
-	b.ptrs = make([]uint32, numPtrs)
-	for i := 0; i < len(b.ptrs); i++ {
-		b.ptrs[i] = uint32(readInt(raw[:4]))
+	ptrs := make([]uint32, numPtrs)
+	for i := 0; i < len(ptrs); i++ {
+		ptrs[i] = uint32(readInt(raw[:4]))
 		raw = raw[4:]
 	}
 
@@ -366,7 +365,7 @@ func parseBlock(raw []byte) (*block, error) {
 		return nil, fmt.Errorf("application data has unexpected size")
 	}
 
-	return &block{ptrs, raw[:size]}
+	return &block{ptrs, raw[:size]}, nil
 }
 
 // Upgrade modifies this node from a tail node to an intermediate node and
@@ -397,13 +396,9 @@ func (b *block) Marshal() []byte {
 	out := make([]byte, blockSize)
 	rest := out[0:]
 
-	// Write index.
-	writeInt(b.idx, rest[:3])
-	rest = rest[3:]
-
 	// Write pointers.
 	for i := 0; i < len(b.ptrs); i++ {
-		writeInt(b.ptrs[i], rest[:4])
+		writeInt(int(b.ptrs[i]), rest[:4])
 		rest = rest[4:]
 	}
 
