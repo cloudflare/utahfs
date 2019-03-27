@@ -15,10 +15,24 @@ func init() {
 }
 
 // memStorage implements the ObjectStorage interface over a map.
-type memStorage map[string][]byte
+type memStorage struct {
+	state map[string]interface{}
+	data  map[uint32][]byte
+}
 
-func (ms memStorage) Get(key string) ([]byte, error) {
-	d, ok := ms[key]
+func newMemStorage() BlockStorage {
+	return memStorage{
+		state: make(map[string]interface{}),
+		data:  make(map[uint32][]byte),
+	}
+}
+
+func (ms memStorage) State() (map[string]interface{}, error) {
+	return ms.state, nil
+}
+
+func (ms memStorage) Get(key uint32) ([]byte, error) {
+	d, ok := ms.data[key]
 	if !ok {
 		return nil, ErrObjectNotFound
 	}
@@ -27,25 +41,20 @@ func (ms memStorage) Get(key string) ([]byte, error) {
 	return data, nil
 }
 
-func (ms memStorage) Set(key string, data []byte) error {
+func (ms memStorage) Set(key uint32, data []byte) error {
 	d := make([]byte, len(data))
 	copy(d, data)
-	ms[key] = d
-	return nil
-}
-
-func (ms memStorage) Delete(key string) error {
-	delete(ms, key)
+	ms.data[key] = d
 	return nil
 }
 
 type testData struct {
-	bf   *blockFile
+	bf   *BlockFile
 	pos  int
 	data []byte
 }
 
-func testBlockStorageSingle(t *testing.T, td *testData) {
+func testBFS(t *testing.T, td *testData) {
 	bf, pos, data := td.bf, td.pos, td.data
 
 	dice := rand.Intn(30)
@@ -81,7 +90,7 @@ func testBlockStorageSingle(t *testing.T, td *testData) {
 			t.Fatalf("%v != %v", got, pos)
 		}
 	} else if len(data) > 0 && dice < 20 { // Read.
-		p := make([]byte, rand.Int63n(dataSize)+1)
+		p := make([]byte, rand.Int63n(256)+1)
 
 		n, err := bf.Read(p)
 		if pos == len(data) {
@@ -104,7 +113,7 @@ func testBlockStorageSingle(t *testing.T, td *testData) {
 		}
 		pos += n
 	} else { // Write.
-		p := make([]byte, rand.Int63n(3*dataSize)+1)
+		p := make([]byte, rand.Int63n(3*256)+1)
 		crand.Read(p)
 
 		n, err := bf.Write(p)
@@ -125,11 +134,10 @@ func testBlockStorageSingle(t *testing.T, td *testData) {
 	td.pos, td.data = pos, data
 }
 
-func TestBlockStorage(t *testing.T) {
-	bs := &blockStorage{
-		store: make(memStorage),
-		trash: nilPtr,
-		next:  0,
+func TestBlockFilesystem(t *testing.T) {
+	bfs, err := NewBlockFilesystem(newMemStorage(), 3, 256)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	ptrs := make([]uint32, 0)
@@ -139,7 +147,7 @@ func TestBlockStorage(t *testing.T) {
 		dice := rand.Intn(1000)
 
 		if len(ptrs) == 0 || dice == 0 {
-			ptr, bf, err := bs.Create()
+			ptr, bf, err := bfs.Create()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -147,7 +155,7 @@ func TestBlockStorage(t *testing.T) {
 			files[ptr] = &testData{bf, 0, nil}
 		} else {
 			ptr := ptrs[rand.Intn(len(ptrs))]
-			testBlockStorageSingle(t, files[ptr])
+			testBFS(t, files[ptr])
 		}
 	}
 
