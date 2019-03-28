@@ -20,3 +20,12 @@ type ObjectStorage interface {
 	// Delete removes the object with the given key.
 	Delete(key string) (err error)
 }
+
+func dup(in []byte) []byte {
+	if in == nil {
+		return nil
+	}
+	out := make([]byte, len(in))
+	copy(out, in)
+	return out
+}
