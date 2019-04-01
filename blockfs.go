@@ -84,15 +84,11 @@ func (bfs *BlockFilesystem) get(key string, def uint32) (uint32, error) {
 	if err != nil {
 		return nilPtr, err
 	}
-	val, ok := state["bfs-"+key]
+	val, ok := state["bfs-"+key].(uint32)
 	if !ok {
 		return def, nil
 	}
-	val32, ok := val.(uint32)
-	if !ok {
-		return nilPtr, fmt.Errorf("blockfs: state value %v has wrong type: %T", key, val)
-	}
-	return val32, nil
+	return val, nil
 }
 
 func (bfs *BlockFilesystem) set(key string, val uint32) error {
@@ -121,7 +117,7 @@ func (bfs *BlockFilesystem) allocate() (uint32, error) {
 
 	data, err := bfs.store.Get(trash)
 	if err != nil {
-		return nilPtr, fmt.Errorf("blockfs: failed to load block %x: %v", trash, err)
+		return nilPtr, err
 	}
 	b, err := parseBlock(bfs, data)
 	if err != nil {
@@ -143,8 +139,9 @@ func (bfs *BlockFilesystem) Create() (uint32, *BlockFile, error) {
 	}
 
 	ptrs := make([]uint32, bfs.numPtrs)
-	for i := 0; i < len(ptrs); i++ {
-		ptrs[i] = nilPtr
+	ptrs[0] = nilPtr
+	for i := 1; i < len(ptrs); i++ {
+		ptrs[i] = ptr
 	}
 
 	bf := &BlockFile{
@@ -180,6 +177,51 @@ func (bfs *BlockFilesystem) Open(ptr uint32) (*BlockFile, error) {
 	return bf, nil
 }
 
+// Unlink allows the blocks allocated for a file to be re-used for other
+// purposes.
+func (bfs *BlockFilesystem) Unlink(ptr uint32) error {
+	bf, err := bfs.Open(ptr)
+	if err != nil {
+		return err
+	}
+
+	// Seek to the end of the skiplist at `ptr`
+	for {
+		if bf.curr.ptrs[0] == nilPtr {
+			break
+		}
+
+		stepped := false
+		for i := len(bf.curr.ptrs) - 1; i >= 0; i-- {
+			if bf.curr.ptrs[i] == nilPtr {
+				continue
+			} else if err := bf.load(bf.curr.ptrs[i], 0); err != nil {
+				return err
+			}
+			stepped = true
+			break
+		}
+		if !stepped { // This error should only ever occur if the skiplist is corrupted.
+			return fmt.Errorf("blockfs: failed to find a suitable pointer in skiplist")
+		}
+	}
+
+	// Prepend the trash list with `bf` by setting the tail pointer of `bf` as
+	// the current value of `trash` and updating `trash` to be the head of `bf`.
+	trash, err := bfs.get("trash", nilPtr)
+	if err != nil {
+		return err
+	}
+	bf.curr.ptrs[0] = trash
+	if err := bf.persist(); err != nil {
+		return err
+	} else if err := bfs.set("trash", ptr); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // BlockFile implements read-write functionality for a variable-size file over
 // a skiplist of fixed-size blocks.
 type BlockFile struct {
@@ -210,7 +252,7 @@ func (bf *BlockFile) persist() error {
 func (bf *BlockFile) load(ptr uint32, pos int64) error {
 	data, err := bf.parent.store.Get(ptr)
 	if err != nil {
-		return fmt.Errorf("blockfs: failed to load block %x: %v", ptr, err)
+		return err
 	}
 	curr, err := parseBlock(bf.parent, data)
 	if err != nil {
@@ -363,7 +405,7 @@ func (bf *BlockFile) Seek(offset int64, whence int) (int64, error) {
 	} else if whence == io.SeekCurrent {
 		offset = bf.pos + offset
 	} else if whence == io.SeekEnd {
-		offset = bf.size - offset
+		offset = bf.size + offset
 	} else {
 		return -1, fmt.Errorf("blockfs: unexpected value for whence")
 	}
@@ -393,8 +435,8 @@ func (bf *BlockFile) Seek(offset int64, whence int) (int64, error) {
 		if bf.curr.ptrs[0] == nilPtr {
 			return -1, fmt.Errorf("blockfs: unexpectedly reached end of skiplist")
 		}
-		stepped := false
 
+		stepped := false
 		for i := len(bf.curr.ptrs) - 1; i >= 0; i-- {
 			if bf.curr.ptrs[i] == nilPtr {
 				continue
@@ -411,13 +453,69 @@ func (bf *BlockFile) Seek(offset int64, whence int) (int64, error) {
 			stepped = true
 			break
 		}
-
 		if !stepped { // This error should only ever occur if the skiplist is corrupted.
 			return -1, fmt.Errorf("blockfs: failed to find a suitable pointer in skiplist")
 		}
 	}
 
 	return bf.pos, nil
+}
+
+func (bf *BlockFile) Truncate(size int64) error {
+	if size < 0 {
+		return fmt.Errorf("blockfs: cannot truncate to negative size")
+	} else if size >= bf.size {
+		_, err := bf.Seek(0, io.SeekEnd)
+		return err
+	}
+	bf.size = size
+
+	// Seek to any blocks that might point past the end of the new file
+	// boundary. Update them to no longer point over, and collect their pointers
+	// for the new tail block.
+	tailPtrs := make([]uint32, bf.parent.numPtrs)
+	tailPtrs[0] = nilPtr
+
+	endIdx := (bf.size - 1) / bf.parent.dataSize
+	for i := len(tailPtrs) - 1; i >= 1; i-- {
+		jump := int64(1) << uint(i)
+		idx := endIdx / jump * jump
+
+		if _, err := bf.Seek(idx*bf.parent.dataSize, io.SeekStart); err != nil {
+			return err
+		}
+		tailPtrs[i] = bf.ptr
+
+		// Clear any pointers that would now go past the end of the file.
+		if idx == endIdx {
+			continue
+		}
+		for j := i; j < len(bf.curr.ptrs); j++ {
+			bf.curr.ptrs[j] = nilPtr
+		}
+		if err := bf.persist(); err != nil {
+			return err
+		}
+	}
+
+	// Move the rest of the file to the trash.
+	if _, err := bf.Seek(endIdx*bf.parent.dataSize, io.SeekStart); err != nil {
+		return err
+	} else if bf.curr.ptrs[0] != nilPtr {
+		if err := bf.parent.Unlink(bf.curr.ptrs[0]); err != nil {
+			return err
+		}
+	}
+
+	// Convert this block into a tail block.
+	bf.curr.ptrs = tailPtrs
+	bf.curr.data = bf.curr.data[:bf.size-endIdx*bf.parent.dataSize]
+	if err := bf.persist(); err != nil {
+		return err
+	}
+	bf.pos += int64(len(bf.curr.data))
+
+	return nil
 }
 
 type block struct {
@@ -449,8 +547,8 @@ func parseBlock(bfs *BlockFilesystem, raw []byte) (*block, error) {
 	return &block{bfs, ptrs, raw[:size]}, nil
 }
 
-// Upgrade modifies this node from a tail node to an intermediate node and
-// returns the pointers for the next tail node.
+// Upgrade modifies this block from a tail into an intermediate and returns the
+// pointers for the next tail.
 func (b *block) Upgrade(currIdx int64, currPtr, nextPtr uint32) []uint32 {
 	// Compute the tail pointers for the subsequent block.
 	out := make([]uint32, b.parent.numPtrs)

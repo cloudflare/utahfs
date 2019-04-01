@@ -81,7 +81,7 @@ func testBFS(t *testing.T, td *testData) {
 		}
 	} else if len(data) > 0 && dice == 2 { // Seek from end.
 		off := rand.Int63n(int64(len(data)))
-		got, err := bf.Seek(off, io.SeekEnd)
+		got, err := bf.Seek(-off, io.SeekEnd)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -89,6 +89,14 @@ func testBFS(t *testing.T, td *testData) {
 		if got != int64(pos) {
 			t.Fatalf("%v != %v", got, pos)
 		}
+	} else if len(data) > 0 && dice == 3 { // Truncate.
+		size := rand.Int63n(int64(len(data)))
+		err := bf.Truncate(size)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pos = int(size)
+		data = data[:size]
 	} else if len(data) > 0 && dice < 20 { // Read.
 		p := make([]byte, rand.Int63n(256)+1)
 
@@ -143,8 +151,8 @@ func TestBlockFilesystem(t *testing.T) {
 	ptrs := make([]uint32, 0)
 	files := make(map[uint32]*testData)
 
-	for i := 0; i < 10000; i++ {
-		dice := rand.Intn(1000)
+	for i := 0; i < 100000; i++ {
+		dice := rand.Intn(10000)
 
 		if len(ptrs) == 0 || dice == 0 {
 			ptr, bf, err := bfs.Create()
