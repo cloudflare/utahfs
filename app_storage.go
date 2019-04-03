@@ -27,8 +27,8 @@ type AppStorage interface {
 
 	// Commit persists any changes made to the backend.
 	Commit() error
-	// Abort discards all changes made in this transaction.
-	Abort() error
+	// Rollback discards all changes made in this transaction.
+	Rollback()
 }
 
 type wal struct {
@@ -185,10 +185,6 @@ func (lw *localWAL) commit() error {
 	return nil
 }
 
-func (lw *localWAL) Abort() error {
-	if !lw.started {
-		return fmt.Errorf("wal: transaction not active")
-	}
+func (lw *localWAL) Rollback() {
 	lw.started, lw.curr = false, nil
-	return nil
 }
