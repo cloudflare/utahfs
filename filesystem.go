@@ -38,8 +38,8 @@ type filesystem struct {
 
 // NewFilesystem returns a FUSE binding that internally stores data in a
 // block-based filesystem.
-func NewFilesystem(bfs *BlockFilesystem) (fuse.FileSystemInterface, error) {
-	nm := &nodeManager{bfs}
+func NewFilesystem(store AppStorage, bfs *BlockFilesystem) (fuse.FileSystemInterface, error) {
+	nm := &nodeManager{store, bfs}
 
 	if err := nm.Start(); err != nil {
 		return nil, err
@@ -94,7 +94,7 @@ func (fs *filesystem) Rmdir(path string) int {
 	return fs.removeNode(path, true, true)
 }
 
-func (fs *filesystem) Link(oldpath string, newpath string) int {
+func (fs *filesystem) Link(oldpath, newpath string) int {
 	defer fs.synchronize()()
 
 	_, oldnode, _, errc := fs.lookupNode(oldpath, nil)
@@ -121,7 +121,7 @@ func (fs *filesystem) Link(oldpath string, newpath string) int {
 	return commit(fs.nm, oldnode, newprnt)
 }
 
-func (fs *filesystem) Symlink(target string, newpath string) int {
+func (fs *filesystem) Symlink(target, newpath string) int {
 	defer fs.synchronize()()
 	return fs.makeNode(newpath, fuse.S_IFLNK|00777, 0, []byte(target))
 }
@@ -146,7 +146,7 @@ func (fs *filesystem) Readlink(path string) (int, string) {
 	return 0, string(data)
 }
 
-func (fs *filesystem) Rename(oldpath string, newpath string) int {
+func (fs *filesystem) Rename(oldpath, newpath string) int {
 	defer fs.synchronize()()
 
 	oldprnt, oldnode, oldname, errc := fs.lookupNode(oldpath, nil)
@@ -193,7 +193,7 @@ func (fs *filesystem) Chmod(path string, mode uint32) int {
 	return commit(fs.nm, nd)
 }
 
-func (fs *filesystem) Chown(path string, uid uint32, gid uint32) int {
+func (fs *filesystem) Chown(path string, uid, gid uint32) int {
 	defer fs.synchronize()()
 
 	_, nd, _, errc := fs.lookupNode(path, nil)
@@ -353,7 +353,7 @@ func (fs *filesystem) Releasedir(path string, fh uint64) int {
 	return fs.closeNode(fh)
 }
 
-func (fs *filesystem) Setxattr(path string, name string, value []byte, flags int) int {
+func (fs *filesystem) Setxattr(path, name string, value []byte, flags int) int {
 	defer fs.synchronize()()
 
 	_, nd, _, errc := fs.lookupNode(path, nil)
@@ -383,7 +383,7 @@ func (fs *filesystem) Setxattr(path string, name string, value []byte, flags int
 	return commit(fs.nm, nd)
 }
 
-func (fs *filesystem) Getxattr(path string, name string) (int, []byte) {
+func (fs *filesystem) Getxattr(path, name string) (int, []byte) {
 	defer fs.synchronize()()
 
 	_, nd, _, errc := fs.lookupNode(path, nil)
@@ -402,7 +402,7 @@ func (fs *filesystem) Getxattr(path string, name string) (int, []byte) {
 	return 0, xatr
 }
 
-func (fs *filesystem) Removexattr(path string, name string) int {
+func (fs *filesystem) Removexattr(path, name string) int {
 	defer fs.synchronize()()
 
 	_, nd, _, errc := fs.lookupNode(path, nil)
