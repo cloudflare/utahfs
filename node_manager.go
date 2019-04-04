@@ -2,7 +2,6 @@ package utahfs
 
 import (
 	"encoding/gob"
-	"fmt"
 	"io"
 
 	"github.com/billziss-gh/cgofuse/fuse"
@@ -20,8 +19,6 @@ type node struct {
 	XAttr    map[string][]byte
 	Children map[string]uint64
 	Data     uint32
-
-	opencnt int
 }
 
 func (nd *node) open(create bool) error {
@@ -36,7 +33,7 @@ func (nd *node) open(create bool) error {
 			nd.Data, nd.data = ptr, bf
 			return nil
 		}
-		return fmt.Errorf("node: cannot operate on node with no body")
+		return io.EOF
 	}
 
 	bf, err := nd.bfs.Open(nd.Data)
@@ -44,11 +41,14 @@ func (nd *node) open(create bool) error {
 		return err
 	}
 	nd.data = bf
+	nd.data.size = nd.Stat.Size
 	return nil
 }
 
 func (nd *node) ReadAt(p []byte, offset int64) (int, error) {
-	if err := nd.open(false); err != nil {
+	if offset >= nd.Stat.Size {
+		return 0, io.EOF
+	} else if err := nd.open(false); err != nil {
 		return 0, err
 	}
 
@@ -83,7 +83,6 @@ func (nd *node) WriteAt(p []byte, offset int64) (int, error) {
 	if err := nd.open(true); err != nil {
 		return 0, err
 	}
-	nd.data.size = nd.Stat.Size
 
 	if _, err := nd.data.Seek(offset, io.SeekStart); err != nil {
 		return 0, err
@@ -101,7 +100,6 @@ func (nd *node) Truncate(size int64) error {
 	if err := nd.open(true); err != nil {
 		return err
 	}
-	nd.data.size = nd.Stat.Size
 
 	if err := nd.data.Truncate(size); err != nil {
 		return err

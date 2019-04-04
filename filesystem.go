@@ -1,6 +1,7 @@
 package utahfs
 
 import (
+	"io"
 	"log"
 	"strings"
 	"sync"
@@ -30,8 +31,7 @@ type filesystem struct {
 	fuse.FileSystemBase
 
 	nm      *nodeManager
-	root    *node
-	openmap map[uint64]*node
+	rootPtr uint64
 
 	mu sync.Mutex
 }
@@ -62,15 +62,9 @@ func NewFilesystem(store AppStorage, bfs *BlockFilesystem) (fuse.FileSystemInter
 		}
 	}
 
-	root, err := nm.Open(rootPtr)
-	if err != nil {
-		return nil, err
-	}
-
 	return &filesystem{
 		nm:      nm,
-		root:    root,
-		openmap: make(map[uint64]*node),
+		rootPtr: rootPtr,
 	}, nil
 }
 
@@ -283,8 +277,10 @@ func (fs *filesystem) Read(path string, buff []byte, offset int64, fh uint64) in
 		return -fuse.ENOENT
 	}
 	n, err := nd.ReadAt(buff, offset)
-	if err != nil {
-		log.Println(err)
+	if err == io.EOF {
+		return 0
+	} else if err != nil {
+		log.Println(path, offset, err)
 		return -fuse.EIO
 	}
 	nd.Stat.Atim = fuse.Now()
@@ -329,10 +325,15 @@ func (fs *filesystem) Opendir(path string) (int, uint64) {
 	return fs.openNode(path, true)
 }
 
-func (fs *filesystem) Readdir(path string, fill func(name string, stat *fuse.Stat_t, ofst int64) bool, ofst int64, fh uint64) int {
+func (fs *filesystem) Readdir(path string, fill func(name string, stat *fuse.Stat_t, ofst int64) bool, ofst int64, ptr uint64) int {
 	defer fs.synchronize()()
 
-	nd := fs.openmap[fh]
+	nd, err := fs.nm.Open(ptr)
+	if err != nil {
+		log.Println(err)
+		return -fuse.EIO
+	}
+
 	fill(".", &nd.Stat, 0)
 	fill("..", nil, 0)
 	for name, ptr := range nd.Children {
@@ -484,20 +485,32 @@ func (fs *filesystem) Setchgtime(path string, tmsp fuse.Timespec) int {
 }
 
 func (fs *filesystem) lookupNode(path string, ancestor *node) (prnt, nd *node, name string, errc int) {
-	prnt, nd, name = fs.root, fs.root, ""
+	root, err := fs.nm.Open(fs.rootPtr)
+	if err != nil {
+		log.Println(err)
+		return nil, nil, "", -fuse.EIO
+	}
+	prnt, nd, name = root, root, ""
 
 	for _, c := range split(path) {
 		if len(c) >= 255 {
 			panic(fuse.Error(-fuse.ENAMETOOLONG))
 		} else if c != "" {
-			child, err := fs.nm.Open(nd.Children[c])
-			if err != nil {
-				log.Println(err)
-				return nil, nil, "", -fuse.EIO
+			var child *node
+
+			ptr, ok := nd.Children[c]
+			if ok {
+				var err error
+				child, err = fs.nm.Open(ptr)
+				if err != nil {
+					log.Println(err)
+					return nil, nil, "", -fuse.EIO
+				}
 			}
+
 			prnt, nd, name = nd, child, c
 
-			if ancestor != nil && nd == ancestor {
+			if ancestor != nil && nd.Stat.Ino == ancestor.Stat.Ino {
 				name = "" // special case loop condition
 				return
 			}
@@ -592,19 +605,10 @@ func (fs *filesystem) openNode(path string, dir bool) (int, uint64) {
 	} else if dir && nd.Stat.Mode&fuse.S_IFMT != fuse.S_IFDIR {
 		return -fuse.ENOTDIR, ^uint64(0)
 	}
-	nd.opencnt++
-	if nd.opencnt == 1 {
-		fs.openmap[nd.Stat.Ino] = nd
-	}
 	return 0, uint64(nd.Stat.Ino)
 }
 
 func (fs *filesystem) closeNode(fh uint64) int {
-	nd := fs.openmap[fh]
-	nd.opencnt--
-	if nd.opencnt == 0 {
-		delete(fs.openmap, nd.Stat.Ino)
-	}
 	return 0
 }
 
@@ -613,7 +617,12 @@ func (fs *filesystem) getNode(path string, fh uint64) (*node, int) {
 		_, nd, _, errc := fs.lookupNode(path, nil)
 		return nd, errc
 	} else {
-		return fs.openmap[fh], 0
+		nd, err := fs.nm.Open(fh)
+		if err != nil {
+			log.Println(err)
+			return nil, -fuse.EIO
+		}
+		return nd, 0
 	}
 }
 

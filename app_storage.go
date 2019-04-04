@@ -91,15 +91,19 @@ func (lw *localWAL) Start() error {
 
 func (lw *localWAL) start() error {
 	raw, err := lw.store.Get("state")
-	if err != nil {
+	if err == ErrObjectNotFound {
+		lw.started, lw.curr = true, newWAL(make(map[string]interface{}))
+		return nil
+	} else if err != nil {
 		return err
 	}
+
 	state := make(map[string]interface{})
 	if err := gob.NewDecoder(bytes.NewBuffer(raw)).Decode(&state); err != nil {
 		return err
 	}
-
 	lw.started, lw.curr = true, newWAL(state)
+
 	return nil
 }
 
