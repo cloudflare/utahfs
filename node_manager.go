@@ -109,6 +109,15 @@ func (nd *node) Truncate(size int64) error {
 	return nil
 }
 
+func (nd *node) Equals(other *node) bool {
+	if nd == nil && other == nil {
+		return true
+	} else if nd == nil || other == nil {
+		return false
+	}
+	return nd.Stat.Ino == other.Stat.Ino
+}
+
 // Persist writes the node to storage, to capture any changes to this struct's
 // fields.
 func (nd *node) Persist() error {

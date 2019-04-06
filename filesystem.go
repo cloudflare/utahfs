@@ -157,7 +157,7 @@ func (fs *filesystem) Rename(oldpath, newpath string) int {
 	} else if newname == "" {
 		// guard against directory loop creation
 		return -fuse.EINVAL
-	} else if oldprnt.Stat.Ino == newprnt.Stat.Ino && oldname == newname {
+	} else if oldprnt.Equals(newprnt) && oldname == newname {
 		return 0
 	}
 	if newnode != nil {
@@ -166,8 +166,13 @@ func (fs *filesystem) Rename(oldpath, newpath string) int {
 			return errc
 		}
 	}
-	delete(oldprnt.Children, oldname)
-	newprnt.Children[newname] = oldnode.Stat.Ino
+	if oldprnt.Equals(newprnt) {
+		delete(newprnt.Children, oldname)
+		newprnt.Children[newname] = oldnode.Stat.Ino
+	} else {
+		delete(oldprnt.Children, oldname)
+		newprnt.Children[newname] = oldnode.Stat.Ino
+	}
 
 	return commit(fs.nm, oldprnt, newprnt)
 }
@@ -510,7 +515,7 @@ func (fs *filesystem) lookupNode(path string, ancestor *node) (prnt, nd *node, n
 
 			prnt, nd, name = nd, child, c
 
-			if ancestor != nil && nd.Stat.Ino == ancestor.Stat.Ino {
+			if ancestor != nil && nd.Equals(ancestor) {
 				name = "" // special case loop condition
 				return
 			}
@@ -632,6 +637,10 @@ func (fs *filesystem) synchronize() func() {
 		log.Fatal(err)
 	}
 	return func() {
+		if r := recover(); r != nil {
+			log.Println(r)
+			panic(r)
+		}
 		fs.nm.Rollback()
 		fs.mu.Unlock()
 	}
