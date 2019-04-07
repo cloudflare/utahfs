@@ -3,6 +3,7 @@ package utahfs
 import (
 	"io"
 	"log"
+	"runtime/debug"
 	"strings"
 	"sync"
 
@@ -639,6 +640,7 @@ func (fs *filesystem) synchronize() func() {
 	return func() {
 		if r := recover(); r != nil {
 			log.Println(r)
+			log.Println(string(debug.Stack()))
 			panic(r)
 		}
 		fs.nm.Rollback()
