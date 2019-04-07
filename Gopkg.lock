@@ -26,6 +26,17 @@
   revision = "eaceba16903255cb149d1efc316f6cc83d765268"
 
 [[projects]]
+  digest = "1:d15ee511aa0f56baacc1eb4c6b922fa1c03b38413b6be18166b996d82a0156ea"
+  name = "github.com/hashicorp/golang-lru"
+  packages = [
+    ".",
+    "simplelru",
+  ]
+  pruneopts = "UT"
+  revision = "7087cb70de9f7a8bc0a10c375cb0d2280a8edf9c"
+  version = "v0.5.1"
+
+[[projects]]
   branch = "master"
   digest = "1:63987b971c0f3240a0f1eed70b80b360e6a57d7a8c85ed7daa8bf770319ab308"
   name = "github.com/pquerna/ffjson"
@@ -50,6 +61,7 @@
   analyzer-version = 1
   input-imports = [
     "github.com/billziss-gh/cgofuse/fuse",
+    "github.com/hashicorp/golang-lru",
     "gopkg.in/kothar/go-backblaze.v0",
   ]
   solver-name = "gps-cdcl"

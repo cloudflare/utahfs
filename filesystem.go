@@ -40,9 +40,10 @@ type filesystem struct {
 // NewFilesystem returns a FUSE binding that internally stores data in a
 // block-based filesystem.
 func NewFilesystem(store AppStorage, bfs *BlockFilesystem) (fuse.FileSystemInterface, error) {
-	nm := &nodeManager{store, bfs}
-
-	if err := nm.Start(); err != nil {
+	nm, err := newNodeManager(store, bfs, 128)
+	if err != nil {
+		return nil, err
+	} else if err := nm.Start(); err != nil {
 		return nil, err
 	}
 	defer nm.Rollback()

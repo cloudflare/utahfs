@@ -429,6 +429,9 @@ func (bf *BlockFile) Seek(offset int64, whence int) (int64, error) {
 		if d := offset - bf.pos; d < bf.parent.dataSize {
 			bf.pos += d
 			return offset, nil
+		} else if bf.curr.ptrs[0] == nilPtr && d == bf.parent.dataSize {
+			bf.pos += d
+			return offset, nil
 		}
 
 		// We need to load another block. Choose the next pointer to follow.

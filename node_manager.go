@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/billziss-gh/cgofuse/fuse"
+	"github.com/hashicorp/golang-lru"
 )
 
 const nilPtr64 = ^uint64(0)
@@ -143,6 +144,19 @@ func (nd *node) Persist() error {
 type nodeManager struct {
 	store AppStorage
 	bfs   *BlockFilesystem
+	cache *lru.Cache
+}
+
+func newNodeManager(store AppStorage, bfs *BlockFilesystem, cacheSize int) (*nodeManager, error) {
+	cache, err := lru.New(cacheSize)
+	if err != nil {
+		return nil, err
+	}
+	return &nodeManager{
+		store: store,
+		bfs:   bfs,
+		cache: cache,
+	}, nil
 }
 
 func (nm *nodeManager) Start() error  { return nm.store.Start() }
@@ -184,6 +198,10 @@ func (nm *nodeManager) Create(dev uint64, mode, uid, gid uint32) (uint64, error)
 }
 
 func (nm *nodeManager) Open(ptr uint64) (*node, error) {
+	if nd, ok := nm.cache.Get(ptr); ok {
+		return nd.(*node), nil
+	}
+
 	bf, err := nm.bfs.Open(uint32(ptr))
 	if err != nil {
 		return nil, err
@@ -196,6 +214,7 @@ func (nm *nodeManager) Open(ptr uint64) (*node, error) {
 	nd.self = bf
 	nd.Stat.Ino = ptr
 
+	nm.cache.Add(ptr, nd)
 	return nd, nil
 }
 
