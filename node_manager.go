@@ -163,7 +163,7 @@ func (nm *nodeManager) Start() error  { return nm.store.Start() }
 func (nm *nodeManager) Commit() error { return nm.store.Commit() }
 func (nm *nodeManager) Rollback()     { nm.store.Rollback() }
 
-func (nm *nodeManager) State() (map[string]interface{}, error) { return nm.store.State() }
+func (nm *nodeManager) State() (*State, error) { return nm.store.State() }
 
 func (nm *nodeManager) Create(dev uint64, mode, uid, gid uint32) (uint64, error) {
 	tmsp := fuse.Now()

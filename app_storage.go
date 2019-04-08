@@ -4,9 +4,37 @@ import (
 	"bytes"
 	"encoding/gob"
 	"fmt"
-	"io/ioutil"
-	"os"
 )
+
+// State contains all of the shared global state of a deployment.
+type State struct {
+	// RootPtr points to the root inode of the filesystem.
+	RootPtr uint64
+
+	// Blocks that were previously allocated but are now un-used are kept in a
+	// linked list. TrashPtr points to the head of this list.
+	TrashPtr uint32
+	// NextPtr will be the pointer of the next block which is allocated.
+	NextPtr uint32
+}
+
+func newState() *State {
+	return &State{
+		RootPtr: nilPtr64,
+
+		TrashPtr: nilPtr,
+		NextPtr:  0,
+	}
+}
+
+func (s *State) Clone() *State {
+	return &State{
+		RootPtr: s.RootPtr,
+
+		TrashPtr: s.TrashPtr,
+		NextPtr:  s.NextPtr,
+	}
+}
 
 // AppStorage is an extension of the ObjectStorage interface that provides
 // shared state and atomic transactions.
@@ -19,9 +47,9 @@ type AppStorage interface {
 	Start() error
 
 	// State returns a map of shared global state. Consumers may modify the
-	// returned map, and these modifications will be persisted after Commit is
-	// called.
-	State() (map[string]interface{}, error)
+	// returned struct, and these modifications will be persisted after Commit
+	// is called.
+	State() (*State, error)
 
 	ObjectStorage
 
@@ -31,164 +59,124 @@ type AppStorage interface {
 	Rollback()
 }
 
-type wal struct {
-	State   map[string]interface{}
-	Writes  map[string][]byte
-	Deletes map[string]struct{}
+type changes struct {
+	Original *State
+
+	State  *State
+	Writes map[string][]byte
 }
 
-func newWAL(state map[string]interface{}) *wal {
-	return &wal{
-		State:   state,
-		Writes:  make(map[string][]byte),
-		Deletes: make(map[string]struct{}),
+func newChanges(state *State) *changes {
+	return &changes{
+		Original: state.Clone(),
+
+		State:  state,
+		Writes: make(map[string][]byte),
 	}
 }
 
-type localWAL struct {
-	walFile string
-	store   ObjectStorage
-
-	started bool
-	curr    *wal
+// appStorage is an extension of the ReliableStorage interface that provides
+// shared state.
+type appStorage struct {
+	store   reliableStorage
+	pending *changes
 }
 
-// NewLocalWAL returns an implementation of the AppStorage interface which works
-// by first writing all changes to a file at `walFile` before trying to move any
-// to the object storage provider `store`.
-func NewLocalWAL(walFile string, store ObjectStorage) AppStorage {
-	return &localWAL{
-		walFile: walFile,
-		store:   store,
-	}
+func newAppStorage(store reliableStorage) *appStorage {
+	return &appStorage{store: store}
 }
 
-func (lw *localWAL) Start() error {
-	if lw.started {
-		return fmt.Errorf("wal: transaction already started")
+func (as *appStorage) Start() error {
+	if as.pending != nil {
+		return fmt.Errorf("app: transaction already started")
 	}
 
-	raw, err := ioutil.ReadFile(lw.walFile)
-	if os.IsNotExist(err) {
-		return lw.start()
-	} else if err != nil {
-		return err
-	} // else, a previous WAL exists. Try to parse and re-apply it.
-
-	lw.curr = &wal{}
-	if err := gob.NewDecoder(bytes.NewBuffer(raw)).Decode(lw.curr); err != nil {
-		if err := os.Remove(lw.walFile); err != nil {
-			return err
-		}
-		return lw.start()
-	}
-
-	if err := lw.commit(); err != nil {
+	if err := as.store.Start(); err != nil {
 		return err
 	}
-	return lw.start()
-}
-
-func (lw *localWAL) start() error {
-	raw, err := lw.store.Get("state")
+	raw, err := as.store.Get("state")
 	if err == ErrObjectNotFound {
-		lw.started, lw.curr = true, newWAL(make(map[string]interface{}))
+		as.pending = newChanges(newState())
 		return nil
 	} else if err != nil {
 		return err
 	}
 
-	state := make(map[string]interface{})
-	if err := gob.NewDecoder(bytes.NewBuffer(raw)).Decode(&state); err != nil {
+	state := newState()
+	if err := gob.NewDecoder(bytes.NewBuffer(raw)).Decode(state); err != nil {
 		return err
 	}
-	lw.started, lw.curr = true, newWAL(state)
+	as.pending = newChanges(state)
 
 	return nil
 }
 
-func (lw *localWAL) State() (map[string]interface{}, error) {
-	if !lw.started {
-		return nil, fmt.Errorf("wal: transaction not active")
+// State returns a struct of shared global state. Consumers may modify the
+// returned struct, and these modifications will be persisted after Commit is
+// called.
+func (as *appStorage) State() (*State, error) {
+	if as.pending == nil {
+		return nil, fmt.Errorf("app: transaction not active")
 	}
-	return lw.curr.State, nil
+	return as.pending.State, nil
 }
 
-func (lw *localWAL) Get(key string) ([]byte, error) {
-	if !lw.started {
-		return nil, fmt.Errorf("wal: transaction not active")
+func (as *appStorage) Get(key string) ([]byte, error) {
+	if as.pending == nil {
+		return nil, fmt.Errorf("app: transaction not active")
 	}
-	if data, ok := lw.curr.Writes[key]; ok {
-		return dup(data), nil
-	} else if _, ok := lw.curr.Deletes[key]; ok {
+	key = "d" + key
+
+	if data, ok := as.pending.Writes[key]; ok {
+		if data != nil {
+			return dup(data), nil
+		}
 		return nil, ErrObjectNotFound
 	}
-	return lw.store.Get("d" + key)
+	return as.store.Get(key)
 }
 
-func (lw *localWAL) Set(key string, data []byte) error {
-	if !lw.started {
-		return fmt.Errorf("wal: transaction not active")
+func (as *appStorage) Set(key string, data []byte) error {
+	if as.pending == nil {
+		return fmt.Errorf("app: transaction not active")
 	}
-	lw.curr.Writes[key] = dup(data)
-	delete(lw.curr.Deletes, key)
+	key = "d" + key
+
+	as.pending.Writes[key] = dup(data)
 	return nil
 }
 
-func (lw *localWAL) Delete(key string) error {
-	if !lw.started {
-		return fmt.Errorf("wal: transaction not active")
+func (as *appStorage) Delete(key string) error {
+	if as.pending == nil {
+		return fmt.Errorf("app: transaction not active")
 	}
-	delete(lw.curr.Writes, key)
-	lw.curr.Deletes[key] = struct{}{}
+	key = "d" + key
+
+	as.pending.Writes[key] = nil
 	return nil
 }
 
-func (lw *localWAL) Commit() error {
-	if !lw.started {
-		return fmt.Errorf("wal: transaction not active")
-	}
-	fh, err := os.Create(lw.walFile)
-	if err != nil {
-		return err
-	} else if err := gob.NewEncoder(fh).Encode(lw.curr); err != nil {
-		return err
-	} else if err := fh.Sync(); err != nil {
-		return err
-	} else if err := fh.Close(); err != nil {
-		return err
+func (as *appStorage) Commit() error {
+	if as.pending == nil {
+		return fmt.Errorf("app: transaction not active")
 	}
 
-	return lw.commit()
-}
-
-func (lw *localWAL) commit() error {
-	state := &bytes.Buffer{}
-	if err := gob.NewEncoder(state).Encode(lw.curr.State); err != nil {
-		return err
-	} else if err := lw.store.Set("state", state.Bytes()); err != nil {
-		return err
-	}
-
-	for key, val := range lw.curr.Writes {
-		if err := lw.store.Set("d"+key, val); err != nil {
+	if *as.pending.Original != *as.pending.State {
+		buff := &bytes.Buffer{}
+		if err := gob.NewEncoder(buff).Encode(as.pending.State); err != nil {
 			return err
 		}
+		as.pending.Writes["state"] = buff.Bytes()
 	}
-
-	for key, _ := range lw.curr.Deletes {
-		if err := lw.store.Delete("d" + key); err != nil {
-			return err
-		}
-	}
-
-	if err := os.Remove(lw.walFile); err != nil {
+	if err := as.store.Commit(as.pending.Writes); err != nil {
 		return err
 	}
-	lw.started, lw.curr = false, nil
+	as.pending = nil
+
 	return nil
 }
 
-func (lw *localWAL) Rollback() {
-	lw.started, lw.curr = false, nil
+func (as *appStorage) Rollback() {
+	as.store.Commit(nil)
+	as.pending = nil
 }

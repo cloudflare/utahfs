@@ -51,14 +51,12 @@ func NewFilesystem(store AppStorage, bfs *BlockFilesystem) (fuse.FileSystemInter
 	state, err := nm.State()
 	if err != nil {
 		return nil, err
-	}
-	rootPtr, ok := state["fs-root"].(uint64)
-	if !ok {
-		rootPtr, err = nm.Create(0, fuse.S_IFDIR|00777, 0, 0)
+	} else if state.RootPtr == nilPtr64 {
+		rootPtr, err := nm.Create(0, fuse.S_IFDIR|00777, 0, 0)
 		if err != nil {
 			return nil, err
 		}
-		state["fs-root"] = rootPtr
+		state.RootPtr = rootPtr
 		if err := nm.Commit(); err != nil {
 			return nil, err
 		}
@@ -66,7 +64,7 @@ func NewFilesystem(store AppStorage, bfs *BlockFilesystem) (fuse.FileSystemInter
 
 	return &filesystem{
 		nm:      nm,
-		rootPtr: rootPtr,
+		rootPtr: state.RootPtr,
 	}, nil
 }
 

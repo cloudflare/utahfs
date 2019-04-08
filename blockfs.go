@@ -12,7 +12,7 @@ var errEndOfBlock = fmt.Errorf("blockfs: reached end of block")
 // BlockStorage is a derivative of AppStorage that uses uint32 pointers as keys
 // instead of strings. It is meant to help make implementing ORAM easier.
 type BlockStorage interface {
-	State() (map[string]interface{}, error)
+	State() (*State, error)
 
 	Get(ptr uint32) (data []byte, err error)
 	Set(ptr uint32, data []byte) (err error)
@@ -29,7 +29,7 @@ func NewBasicBlockStorage(base AppStorage) BlockStorage {
 	return basicBlockStorage{base}
 }
 
-func (bbs basicBlockStorage) State() (map[string]interface{}, error) {
+func (bbs basicBlockStorage) State() (*State, error) {
 	return bbs.base.State()
 }
 
@@ -79,54 +79,28 @@ func NewBlockFilesystem(store BlockStorage, numPtrs, dataSize int64) (*BlockFile
 
 func (bfs *BlockFilesystem) blockSize() int64 { return 4*bfs.numPtrs + 3 + bfs.dataSize }
 
-func (bfs *BlockFilesystem) get(key string, def uint32) (uint32, error) {
-	state, err := bfs.store.State()
-	if err != nil {
-		return nilPtr, err
-	}
-	val, ok := state["bfs-"+key].(uint32)
-	if !ok {
-		return def, nil
-	}
-	return val, nil
-}
-
-func (bfs *BlockFilesystem) set(key string, val uint32) error {
-	state, err := bfs.store.State()
-	if err != nil {
-		return err
-	}
-	state["bfs-"+key] = val
-	return nil
-}
-
 // allocate returns the pointer of a block which is free for use by the caller.
 func (bfs *BlockFilesystem) allocate() (uint32, error) {
-	trash, err := bfs.get("trash", nilPtr)
+	state, err := bfs.store.State()
 	if err != nil {
 		return nilPtr, err
-	} else if trash == nilPtr {
-		next, err := bfs.get("next", 0)
-		if err != nil {
-			return nilPtr, err
-		} else if err := bfs.set("next", next+1); err != nil {
-			return nilPtr, err
-		}
+	} else if state.TrashPtr == nilPtr {
+		next := state.NextPtr
+		state.NextPtr += 1
 		return next, nil
 	}
 
-	data, err := bfs.store.Get(trash)
+	data, err := bfs.store.Get(state.TrashPtr)
 	if err != nil {
 		return nilPtr, err
 	}
 	b, err := parseBlock(bfs, data)
 	if err != nil {
-		return nilPtr, fmt.Errorf("blockfs: failed to parse block %x: %v", trash, err)
+		return nilPtr, fmt.Errorf("blockfs: failed to parse block %x: %v", state.TrashPtr, err)
 	}
+	trash := state.TrashPtr
+	state.TrashPtr = b.ptrs[0]
 
-	if err := bfs.set("trash", b.ptrs[0]); err != nil {
-		return nilPtr, err
-	}
 	return trash, nil
 }
 
@@ -208,18 +182,14 @@ func (bfs *BlockFilesystem) Unlink(ptr uint32) error {
 
 	// Prepend the trash list with `bf` by setting the tail pointer of `bf` as
 	// the current value of `trash` and updating `trash` to be the head of `bf`.
-	trash, err := bfs.get("trash", nilPtr)
+	state, err := bfs.store.State()
 	if err != nil {
 		return err
 	}
-	bf.curr.ptrs[0] = trash
-	if err := bf.persist(); err != nil {
-		return err
-	} else if err := bfs.set("trash", ptr); err != nil {
-		return err
-	}
+	bf.curr.ptrs[0] = state.TrashPtr
+	state.TrashPtr = ptr
 
-	return nil
+	return bf.persist()
 }
 
 // BlockFile implements read-write functionality for a variable-size file over
