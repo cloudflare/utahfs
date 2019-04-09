@@ -1,8 +1,10 @@
 package utahfs
 
 import (
+	"bytes"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/syndtr/goleveldb/leveldb"
@@ -17,6 +19,8 @@ type reliableStorage interface {
 }
 
 type localWAL struct {
+	mu sync.Mutex
+
 	remote ObjectStorage
 	local  *leveldb.DB
 
@@ -56,57 +60,51 @@ func (lw *localWAL) drain() {
 		case <-lw.wake:
 		}
 
-		for {
-			again, err := lw.drainOnce()
-			if err != nil {
-				log.Println(err)
-				break
-			} else if !again {
-				break
-			}
+		if err := lw.drainOnce(); err != nil {
+			log.Println(err)
 		}
 	}
 }
 
-func (lw *localWAL) drainOnce() (bool, error) {
-	tx, err := lw.local.OpenTransaction()
-	if err != nil {
-		return false, err
-	}
-	defer tx.Commit()
-	again := false
-
-	iter := tx.NewIterator(&util.Range{nil, nil}, nil)
+func (lw *localWAL) drainOnce() error {
+	iter := lw.local.NewIterator(&util.Range{nil, nil}, nil)
 	for i := 0; iter.Next(); i++ {
 		key, val := iter.Key(), iter.Value()
 
 		if val != nil {
 			if err := lw.remote.Set(string(key), val); err != nil {
-				return false, err
+				return err
 			}
 		} else {
 			if err := lw.remote.Delete(string(key)); err != nil {
-				return false, err
+				return err
 			}
 		}
-		if err := tx.Delete(key, nil); err != nil {
-			return false, err
-		}
-
-		if i == 50 {
-			again = true
-			break
+		if err := lw.drop(key, val); err != nil {
+			return err
 		}
 	}
 	iter.Release()
 	if err := iter.Error(); err != nil {
-		return false, err
+		return err
 	}
 
-	if err := tx.Commit(); err != nil {
-		return false, err
+	return nil
+}
+
+func (lw *localWAL) drop(key, val []byte) error {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
+
+	cand, err := lw.local.Get(key, nil)
+	if err == leveldb.ErrNotFound {
+		return nil
+	} else if err != nil {
+		return err
+	} else if !bytes.Equal(val, cand) {
+		return nil
 	}
-	return again, nil
+	return lw.local.Delete(key, nil)
 }
 
 func (lw *localWAL) Start() error {
@@ -158,6 +156,8 @@ func (lw *localWAL) Commit(writes map[string][]byte) error {
 	for key, val := range writes {
 		batch.Put([]byte(key), dup(val))
 	}
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
 	if err := lw.local.Write(batch, &opt.WriteOptions{Sync: true}); err != nil {
 		return err
 	}
