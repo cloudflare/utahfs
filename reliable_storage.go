@@ -73,6 +73,7 @@ func (lw *localWAL) drainOnce() (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	defer tx.Commit()
 	again := false
 
 	iter := tx.NewIterator(&util.Range{nil, nil}, nil)

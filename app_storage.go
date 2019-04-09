@@ -102,7 +102,7 @@ func (as *appStorage) Start() error {
 		return err
 	}
 
-	state := newState()
+	state := &State{}
 	if err := gob.NewDecoder(bytes.NewBuffer(raw)).Decode(state); err != nil {
 		return err
 	}

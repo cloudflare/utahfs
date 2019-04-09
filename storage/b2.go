@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Bren2010/utahfs"
+
 	"gopkg.in/kothar/go-backblaze.v0"
 )
 
@@ -64,7 +65,7 @@ func (b *b2) Get(key string) ([]byte, error) {
 	if resp.StatusCode == 404 {
 		return nil, utahfs.ErrObjectNotFound
 	} else if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("unexpected response status: %v", resp.Status)
+		return nil, fmt.Errorf("storage: unexpected response status: %v", resp.Status)
 	}
 
 	return ioutil.ReadAll(resp.Body)
