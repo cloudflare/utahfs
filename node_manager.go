@@ -3,12 +3,12 @@ package utahfs
 import (
 	"encoding/gob"
 	"io"
+	"os"
+	"time"
 
-	"github.com/billziss-gh/cgofuse/fuse"
 	"github.com/hashicorp/golang-lru"
+	"github.com/jacobsa/fuse/fuseops"
 )
-
-const nilPtr64 = ^uint64(0)
 
 type node struct {
 	bfs *BlockFilesystem
@@ -16,9 +16,8 @@ type node struct {
 	self *BlockFile
 	data *BlockFile
 
-	Stat     fuse.Stat_t
-	XAttr    map[string][]byte
-	Children map[string]uint64
+	Attrs    fuseops.InodeAttributes
+	Children map[string]fuseops.InodeID
 	Data     uint32
 }
 
@@ -42,12 +41,12 @@ func (nd *node) open(create bool) error {
 		return err
 	}
 	nd.data = bf
-	nd.data.size = nd.Stat.Size
+	nd.data.size = int64(nd.Attrs.Size)
 	return nil
 }
 
 func (nd *node) ReadAt(p []byte, offset int64) (int, error) {
-	if offset >= nd.Stat.Size {
+	if offset >= int64(nd.Attrs.Size) {
 		return 0, io.EOF
 	} else if err := nd.open(false); err != nil {
 		return 0, err
@@ -93,7 +92,7 @@ func (nd *node) WriteAt(p []byte, offset int64) (int, error) {
 		return n, err
 	}
 
-	nd.Stat.Size = nd.data.size
+	nd.Attrs.Size = uint64(nd.data.size)
 	return n, nil
 }
 
@@ -106,7 +105,7 @@ func (nd *node) Truncate(size int64) error {
 		return err
 	}
 
-	nd.Stat.Size = nd.data.size
+	nd.Attrs.Size = uint64(nd.data.size)
 	return nil
 }
 
@@ -116,7 +115,7 @@ func (nd *node) Equals(other *node) bool {
 	} else if nd == nil || other == nil {
 		return false
 	}
-	return nd.Stat.Ino == other.Stat.Ino
+	return nd.self.start == other.self.start
 }
 
 // Persist writes the node to storage, to capture any changes to this struct's
@@ -165,44 +164,46 @@ func (nm *nodeManager) Rollback()     { nm.store.Rollback() }
 
 func (nm *nodeManager) State() (*State, error) { return nm.store.State() }
 
-func (nm *nodeManager) Create(dev uint64, mode, uid, gid uint32) (uint64, error) {
-	tmsp := fuse.Now()
+func (nm *nodeManager) Create(mode os.FileMode, uid, gid uint32) (uint32, error) {
+	now := time.Now()
 	nd := node{
-		Stat: fuse.Stat_t{
-			Dev:      dev,
-			Mode:     mode,
-			Nlink:    1,
-			Uid:      uid,
-			Gid:      gid,
-			Atim:     tmsp,
-			Mtim:     tmsp,
-			Ctim:     tmsp,
-			Birthtim: tmsp,
-			Flags:    0,
+		Attrs: fuseops.InodeAttributes{
+			Size: 0,
+
+			Nlink: 1,
+
+			Mode: mode,
+
+			Atime:  now,
+			Mtime:  now,
+			Ctime:  now,
+			Crtime: now,
+
+			Uid: uid,
+			Gid: gid,
 		},
-		XAttr:    nil,
 		Children: nil,
 		Data:     nilPtr,
 	}
-	if nd.Stat.Mode&fuse.S_IFMT == fuse.S_IFDIR {
-		nd.Children = make(map[string]uint64)
+	if nd.Attrs.Mode.IsDir() {
+		nd.Children = make(map[string]fuseops.InodeID)
 	}
 
 	ptr, bf, err := nm.bfs.Create()
 	if err != nil {
-		return nilPtr64, err
+		return nilPtr, err
 	} else if err := gob.NewEncoder(bf).Encode(nd); err != nil {
-		return nilPtr64, err
+		return nilPtr, err
 	}
-	return uint64(ptr), nil
+	return ptr, nil
 }
 
-func (nm *nodeManager) Open(ptr uint64) (*node, error) {
+func (nm *nodeManager) Open(ptr uint32) (*node, error) {
 	if nd, ok := nm.cache.Get(ptr); ok {
 		return nd.(*node), nil
 	}
 
-	bf, err := nm.bfs.Open(uint32(ptr))
+	bf, err := nm.bfs.Open(ptr)
 	if err != nil {
 		return nil, err
 	}
@@ -212,13 +213,12 @@ func (nm *nodeManager) Open(ptr uint64) (*node, error) {
 	}
 	nd.bfs = nm.bfs
 	nd.self = bf
-	nd.Stat.Ino = ptr
 
 	nm.cache.Add(ptr, nd)
 	return nd, nil
 }
 
-func (nm *nodeManager) Unlink(ptr uint64) error {
+func (nm *nodeManager) Unlink(ptr uint32) error {
 	nd, err := nm.Open(ptr)
 	if err != nil {
 		return err

@@ -9,7 +9,7 @@ import (
 // State contains all of the shared global state of a deployment.
 type State struct {
 	// RootPtr points to the root inode of the filesystem.
-	RootPtr uint64
+	RootPtr uint32
 
 	// Blocks that were previously allocated but are now un-used are kept in a
 	// linked list. TrashPtr points to the head of this list.
@@ -20,7 +20,7 @@ type State struct {
 
 func newState() *State {
 	return &State{
-		RootPtr: nilPtr64,
+		RootPtr: nilPtr,
 
 		TrashPtr: nilPtr,
 		NextPtr:  0,

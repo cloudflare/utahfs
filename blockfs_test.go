@@ -16,18 +16,18 @@ func init() {
 
 // memStorage implements the ObjectStorage interface over a map.
 type memStorage struct {
-	state map[string]interface{}
+	state *State
 	data  map[uint32][]byte
 }
 
 func newMemStorage() BlockStorage {
 	return memStorage{
-		state: make(map[string]interface{}),
+		state: newState(),
 		data:  make(map[uint32][]byte),
 	}
 }
 
-func (ms memStorage) State() (map[string]interface{}, error) {
+func (ms memStorage) State() (*State, error) {
 	return ms.state, nil
 }
 
