@@ -83,6 +83,20 @@ func (nd *node) WriteAt(p []byte, offset int64) (int, error) {
 	if err := nd.open(true); err != nil {
 		return 0, err
 	}
+	defer func() {
+		nd.Attrs.Size = uint64(nd.data.size)
+	}()
+
+	// If we're trying to write past the end of the file, pad with null bytes.
+	if uint64(offset) > nd.Attrs.Size {
+		if _, err := nd.data.Seek(0, io.SeekEnd); err != nil {
+			return 0, err
+		}
+		n, err := nd.data.Write(make([]byte, uint64(offset)-nd.Attrs.Size))
+		if err != nil {
+			return n, err
+		}
+	}
 
 	if _, err := nd.data.Seek(offset, io.SeekStart); err != nil {
 		return 0, err
@@ -92,7 +106,6 @@ func (nd *node) WriteAt(p []byte, offset int64) (int, error) {
 		return n, err
 	}
 
-	nd.Attrs.Size = uint64(nd.data.size)
 	return n, nil
 }
 
@@ -100,13 +113,11 @@ func (nd *node) Truncate(size int64) error {
 	if err := nd.open(true); err != nil {
 		return err
 	}
+	defer func() {
+		nd.Attrs.Size = uint64(nd.data.size)
+	}()
 
-	if err := nd.data.Truncate(size); err != nil {
-		return err
-	}
-
-	nd.Attrs.Size = uint64(nd.data.size)
-	return nil
+	return nd.data.Truncate(size)
 }
 
 func (nd *node) Equals(other *node) bool {
