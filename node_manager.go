@@ -8,6 +8,7 @@ import (
 
 	"github.com/hashicorp/golang-lru"
 	"github.com/jacobsa/fuse/fuseops"
+	"github.com/jacobsa/fuse/fuseutil"
 )
 
 type node struct {
@@ -129,9 +130,24 @@ func (nd *node) Equals(other *node) bool {
 	return nd.self.start == other.self.start
 }
 
+func (nd *node) Type() fuseutil.DirentType {
+	if nd.Attrs.Mode.IsRegular() {
+		return fuseutil.DT_File
+	} else if nd.Attrs.Mode.IsDir() {
+		return fuseutil.DT_Directory
+	}
+	return fuseutil.DT_Unknown
+}
+
 // Persist writes the node to storage, to capture any changes to this struct's
 // fields.
 func (nd *node) Persist() error {
+	uid, gid := nd.Attrs.Uid, nd.Attrs.Gid
+	nd.Attrs.Uid, nd.Attrs.Gid = 0, 0
+	defer func() {
+		nd.Attrs.Uid, nd.Attrs.Gid = uid, gid
+	}()
+
 	if _, err := nd.self.Seek(0, io.SeekStart); err != nil {
 		return err
 	} else if err := gob.NewEncoder(nd.self).Encode(nd); err != nil {
@@ -155,9 +171,11 @@ type nodeManager struct {
 	store AppStorage
 	bfs   *BlockFilesystem
 	cache *lru.Cache
+
+	uid, gid uint32
 }
 
-func newNodeManager(store AppStorage, bfs *BlockFilesystem, cacheSize int) (*nodeManager, error) {
+func newNodeManager(store AppStorage, bfs *BlockFilesystem, cacheSize int, uid, gid uint32) (*nodeManager, error) {
 	cache, err := lru.New(cacheSize)
 	if err != nil {
 		return nil, err
@@ -166,6 +184,9 @@ func newNodeManager(store AppStorage, bfs *BlockFilesystem, cacheSize int) (*nod
 		store: store,
 		bfs:   bfs,
 		cache: cache,
+
+		uid: uid,
+		gid: gid,
 	}, nil
 }
 
@@ -175,7 +196,7 @@ func (nm *nodeManager) Rollback()     { nm.store.Rollback() }
 
 func (nm *nodeManager) State() (*State, error) { return nm.store.State() }
 
-func (nm *nodeManager) Create(mode os.FileMode, uid, gid uint32) (uint32, error) {
+func (nm *nodeManager) Create(mode os.FileMode) (uint32, error) {
 	now := time.Now()
 	nd := node{
 		Attrs: fuseops.InodeAttributes{
@@ -189,9 +210,6 @@ func (nm *nodeManager) Create(mode os.FileMode, uid, gid uint32) (uint32, error)
 			Mtime:  now,
 			Ctime:  now,
 			Crtime: now,
-
-			Uid: uid,
-			Gid: gid,
 		},
 		Children: nil,
 		Data:     nilPtr,
@@ -224,6 +242,8 @@ func (nm *nodeManager) Open(ptr uint32) (*node, error) {
 	}
 	nd.bfs = nm.bfs
 	nd.self = bf
+	nd.Attrs.Uid = nm.uid
+	nd.Attrs.Gid = nm.gid
 
 	nm.cache.Add(ptr, nd)
 	return nd, nil

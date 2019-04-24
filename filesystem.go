@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/user"
 	"runtime/debug"
+	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -17,6 +20,24 @@ import (
 // Note: This implementation is largely based on
 // github.com/GoogleCloudPlatform/gcsfuse. If some decision seems weird, it
 // might be justified in that codebase.
+
+func myUserAndGroup() (uint32, uint32, error) {
+	user, err := user.Current()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	uid, err := strconv.ParseUint(user.Uid, 10, 32)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to parse uid (%s): %v", user.Uid, err)
+	}
+	gid, err := strconv.ParseUint(user.Gid, 10, 32)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to parse gid (%s): %v", user.Gid, err)
+	}
+
+	return uint32(uid), uint32(gid), nil
+}
 
 func commit(nm *nodeManager, nds ...*node) error {
 	for _, nd := range nds {
@@ -37,7 +58,10 @@ type filesystem struct {
 
 	nm      *nodeManager
 	rootPtr uint32
-	refs    map[fuseops.InodeID]int
+
+	refCounts    map[fuseops.InodeID]int
+	dirHandles   map[fuseops.HandleID][]fuseutil.Dirent
+	nextHandleID fuseops.HandleID
 
 	mu sync.Mutex
 }
@@ -45,7 +69,11 @@ type filesystem struct {
 // NewFilesystem returns a FUSE binding that internally stores data in a
 // block-based filesystem.
 func NewFilesystem(store AppStorage, bfs *BlockFilesystem) (fuseutil.FileSystem, error) {
-	nm, err := newNodeManager(store, bfs, 128)
+	uid, gid, err := myUserAndGroup()
+	if err != nil {
+		return nil, err
+	}
+	nm, err := newNodeManager(store, bfs, 128, uid, gid)
 	if err != nil {
 		return nil, err
 	} else if err := nm.Start(); err != nil {
@@ -57,7 +85,7 @@ func NewFilesystem(store AppStorage, bfs *BlockFilesystem) (fuseutil.FileSystem,
 	if err != nil {
 		return nil, err
 	} else if state.RootPtr == nilPtr {
-		rootPtr, err := nm.Create(os.ModeDir|0777, 0, 0)
+		rootPtr, err := nm.Create(os.ModeDir | 0777)
 		if err != nil {
 			return nil, err
 		}
@@ -70,7 +98,9 @@ func NewFilesystem(store AppStorage, bfs *BlockFilesystem) (fuseutil.FileSystem,
 	return &filesystem{
 		nm:      nm,
 		rootPtr: state.RootPtr,
-		refs:    make(map[fuseops.InodeID]int),
+
+		refCounts:  make(map[fuseops.InodeID]int),
+		dirHandles: make(map[fuseops.HandleID][]fuseutil.Dirent),
 	}, nil
 }
 
@@ -152,29 +182,135 @@ func (fs *filesystem) SetInodeAttributes(ctx context.Context, op *fuseops.SetIno
 	return commit(fs.nm, nd)
 }
 
-func (fs *filesystem) ForgetInode(ctx context.Context, op *fuseops.ForgetInodeOp) error {
+// func (fs *filesystem) ForgetInode(ctx context.Context, op *fuseops.ForgetInodeOp) error {
+// 	defer fs.synchronize()()
+//
+// 	n, m := fs.refs[op.Inode], int(op.N)
+// 	if n < m {
+// 		panic(fmt.Sprintf("n is greater than lookup count: %v vs %v", n, m))
+// 	} else if n > m {
+// 		fs.refs[op.Inode] = n - m
+// 		return nil
+// 	} // else n == m
+//
+// 	delete(fs.refs, op.Inode)
+//
+// 	nd, err := fs.nm.Open(fs.ptr(op.Inode))
+// 	if err != nil {
+// 		return err
+// 	} else if nd.Attrs.Nlink > 0 {
+// 		return nil
+// 	} else if err := fs.nm.Unlink(fs.ptr(op.Inode)); err != nil {
+// 		return err
+// 	}
+//
+// 	return commit(fs.nm)
+// }
+
+func (fs *filesystem) MkDir(ctx context.Context, op *fuseops.MkDirOp) error {
 	defer fs.synchronize()()
 
-	n, m := fs.refs[op.Inode], int(op.N)
-	if n < m {
-		panic(fmt.Sprintf("n is greater than lookup count: %v vs %v", n, m))
-	} else if n > m {
-		fs.refs[op.Inode] = n - m
-		return nil
-	} // else n == m
+	childPtr, err := fs.nm.Create(op.Mode)
+	if err != nil {
+		return err
+	}
+	childId := fs.inode(childPtr)
 
-	delete(fs.refs, op.Inode)
+	parent, err := fs.nm.Open(fs.ptr(op.Parent))
+	if err != nil {
+		return err
+	} else if !parent.Attrs.Mode.IsDir() {
+		return fuse.ENOTDIR
+	} else if _, ok := parent.Children[op.Name]; ok {
+		return fuse.EEXIST
+	}
+	parent.Children[op.Name] = childId
+
+	child, err := fs.nm.Open(childPtr)
+	if err != nil {
+		return err
+	}
+	op.Entry.Child = childId
+	op.Entry.Attributes = child.Attrs
+	op.Entry.AttributesExpiration = fs.expiration()
+
+	return commit(fs.nm, parent)
+}
+
+func (fs *filesystem) OpenDir(ctx context.Context, op *fuseops.OpenDirOp) error {
+	defer fs.synchronize()()
 
 	nd, err := fs.nm.Open(fs.ptr(op.Inode))
 	if err != nil {
 		return err
-	} else if nd.Attrs.Nlink > 0 {
-		return nil
-	} else if err := fs.nm.Unlink(fs.ptr(op.Inode)); err != nil {
-		return err
+	} else if !nd.Attrs.Mode.IsDir() {
+		return fuse.ENOTDIR
 	}
 
-	return commit(fs.nm)
+	// Alphabetize the entries in the directory, and convert them into a sorted
+	// []fuseutil.Dirent, which is more easily serialized.
+	names := make([]string, 0, len(nd.Children))
+	for name, _ := range nd.Children {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	entries := make([]fuseutil.Dirent, 0, len(nd.Children))
+	for i, name := range names {
+		childId := nd.Children[name]
+
+		child, err := fs.nm.Open(fs.ptr(childId))
+		if err != nil {
+			return fmt.Errorf("failed to open inode for child")
+		}
+		entries = append(entries, fuseutil.Dirent{
+			fuseops.DirOffset(i + 1), childId, name, child.Type(),
+		})
+	}
+
+	// Attach slice of entries to the next handle id and return.
+	handleID := fs.nextHandleID
+	fs.nextHandleID++
+
+	fs.dirHandles[handleID] = entries
+	op.Handle = handleID
+
+	return nil
+}
+
+func (fs *filesystem) ReadDir(ctx context.Context, op *fuseops.ReadDirOp) error {
+	defer fs.synchronize()()
+
+	entries, ok := fs.dirHandles[op.Handle]
+	if !ok {
+		return fmt.Errorf("failed to release unknown handle")
+	}
+	idx := int(op.Offset)
+	if idx > len(entries) {
+		return fuse.EINVAL
+	}
+
+	for i := idx; i < len(entries); i++ {
+		n := fuseutil.WriteDirent(op.Dst[op.BytesRead:], entries[i])
+		if n == 0 {
+			break
+		}
+		op.BytesRead += n
+	}
+
+	return nil
+}
+
+func (fs *filesystem) ReleaseDirHandle(ctx context.Context, op *fuseops.ReleaseDirHandleOp) error {
+	defer fs.synchronize()()
+
+	_, ok := fs.dirHandles[op.Handle]
+	if !ok {
+		return fmt.Errorf("failed to release unknown handle")
+	}
+	delete(fs.dirHandles, op.Handle)
+
+	return nil
 }
 
 func (fs *filesystem) synchronize() func() {

@@ -18,6 +18,31 @@ type reliableStorage interface {
 	Commit(writes map[string][]byte) error
 }
 
+type simpleStorage struct {
+	store ObjectStorage
+}
+
+// NewSimpleStorage returns an AppStorage implementation, intended for testing.
+// It simply panics if the atomicity of a transaction is broken.
+func NewSimpleStorage(store ObjectStorage) AppStorage {
+	return newAppStorage(&simpleStorage{store})
+}
+
+func (ss *simpleStorage) Start() error { return nil }
+
+func (ss *simpleStorage) Get(key string) ([]byte, error) {
+	return ss.store.Get(key)
+}
+
+func (ss *simpleStorage) Commit(writes map[string][]byte) error {
+	for key, val := range writes {
+		if err := ss.store.Set(key, val); err != nil {
+			panic(err)
+		}
+	}
+	return nil
+}
+
 type localWAL struct {
 	mu sync.Mutex
 
