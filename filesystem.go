@@ -59,9 +59,9 @@ type filesystem struct {
 	nm      *nodeManager
 	rootPtr uint32
 
-	refCounts    map[fuseops.InodeID]int
-	dirHandles   map[fuseops.HandleID][]fuseutil.Dirent
 	nextHandleID fuseops.HandleID
+	dirHandles   map[fuseops.HandleID][]fuseutil.Dirent
+	fileHandles  map[fuseops.HandleID]struct{}
 
 	mu sync.Mutex
 }
@@ -99,8 +99,8 @@ func NewFilesystem(store AppStorage, bfs *BlockFilesystem) (fuseutil.FileSystem,
 		nm:      nm,
 		rootPtr: state.RootPtr,
 
-		refCounts:  make(map[fuseops.InodeID]int),
-		dirHandles: make(map[fuseops.HandleID][]fuseutil.Dirent),
+		dirHandles:  make(map[fuseops.HandleID][]fuseutil.Dirent),
+		fileHandles: make(map[fuseops.HandleID]struct{}),
 	}, nil
 }
 
@@ -186,36 +186,73 @@ func (fs *filesystem) SetInodeAttributes(ctx context.Context, op *fuseops.SetIno
 	return commit(fs.nm, nd)
 }
 
+func (fs *filesystem) ForgetInode(ctx context.Context, op *fuseops.ForgetInodeOp) error {
+	return nil
+}
+
 func (fs *filesystem) MkDir(ctx context.Context, op *fuseops.MkDirOp) error {
 	defer fs.synchronize()()
 
-	childPtr, err := fs.nm.Create(op.Mode)
+	parent, child, err := fs.mkNode(ctx, op.Parent, op.Name, op.Mode)
 	if err != nil {
 		return err
 	}
-	childID := fs.inode(childPtr)
-
-	parent, err := fs.nm.Open(fs.ptr(op.Parent))
-	if err != nil {
-		return err
-	} else if !parent.Attrs.Mode.IsDir() {
-		return fuse.ENOTDIR
-	} else if _, ok := parent.Children[op.Name]; ok {
-		return fuse.EEXIST
-	}
-	parent.Attrs.Mtime = time.Now()
-	parent.Attrs.Ctime = time.Now()
-	parent.Children[op.Name] = childID
-
-	child, err := fs.nm.Open(childPtr)
-	if err != nil {
-		return err
-	}
-	op.Entry.Child = childID
+	op.Entry.Child = parent.Children[op.Name]
 	op.Entry.Attributes = child.Attrs
 	op.Entry.AttributesExpiration = fs.expiration()
 
 	return commit(fs.nm, parent)
+}
+
+func (fs *filesystem) MkNode(ctx context.Context, op *fuseops.MkNodeOp) error {
+	defer fs.synchronize()()
+
+	parent, child, err := fs.mkNode(ctx, op.Parent, op.Name, op.Mode)
+	if err != nil {
+		return err
+	}
+	op.Entry.Child = parent.Children[op.Name]
+	op.Entry.Attributes = child.Attrs
+	op.Entry.AttributesExpiration = fs.expiration()
+
+	return commit(fs.nm, parent)
+}
+
+func (fs *filesystem) CreateFile(ctx context.Context, op *fuseops.CreateFileOp) error {
+	defer fs.synchronize()()
+
+	parent, child, err := fs.mkNode(ctx, op.Parent, op.Name, op.Mode)
+	if err != nil {
+		return err
+	}
+	op.Entry.Child = parent.Children[op.Name]
+	op.Entry.Attributes = child.Attrs
+	op.Entry.AttributesExpiration = fs.expiration()
+
+	// Issue the next handle ID. It doesn't mean anything.
+	handleID := fs.nextHandleID
+	fs.nextHandleID++
+
+	fs.fileHandles[handleID] = struct{}{}
+	op.Handle = handleID
+
+	return commit(fs.nm, parent)
+}
+
+func (fs *filesystem) CreateSymlink(ctx context.Context, op *fuseops.CreateSymlinkOp) error {
+	defer fs.synchronize()()
+
+	parent, child, err := fs.mkNode(ctx, op.Parent, op.Name, os.ModeSymlink|0755)
+	if err != nil {
+		return err
+	} else if _, err := child.WriteAt([]byte(op.Target), 0); err != nil {
+		return err
+	}
+	op.Entry.Child = parent.Children[op.Name]
+	op.Entry.Attributes = child.Attrs
+	op.Entry.AttributesExpiration = fs.expiration()
+
+	return commit(fs.nm, parent, child)
 }
 
 func (fs *filesystem) RmDir(ctx context.Context, op *fuseops.RmDirOp) error {
@@ -330,6 +367,106 @@ func (fs *filesystem) ReleaseDirHandle(ctx context.Context, op *fuseops.ReleaseD
 	delete(fs.dirHandles, op.Handle)
 
 	return nil
+}
+
+func (fs *filesystem) OpenFile(ctx context.Context, op *fuseops.OpenFileOp) error {
+	defer fs.synchronize()()
+
+	nd, err := fs.nm.Open(fs.ptr(op.Inode))
+	if err != nil {
+		return err
+	} else if !nd.Attrs.Mode.IsRegular() {
+		return fuse.EINVAL
+	}
+
+	// Issue the next handle ID. It doesn't mean anything.
+	handleID := fs.nextHandleID
+	fs.nextHandleID++
+
+	fs.fileHandles[handleID] = struct{}{}
+	op.Handle = handleID
+
+	return nil
+}
+
+func (fs *filesystem) ReadFile(ctx context.Context, op *fuseops.ReadFileOp) error {
+	defer fs.synchronize()()
+
+	nd, err := fs.nm.Open(fs.ptr(op.Inode))
+	if err != nil {
+		return err
+	} else if !nd.Attrs.Mode.IsRegular() {
+		return fuse.EINVAL
+	}
+
+	n, err := nd.ReadAt(op.Dst, op.Offset)
+	if err != nil {
+		return err
+	}
+	op.BytesRead = n
+
+	return nil
+}
+
+func (fs *filesystem) WriteFile(ctx context.Context, op *fuseops.WriteFileOp) error {
+	defer fs.synchronize()()
+
+	nd, err := fs.nm.Open(fs.ptr(op.Inode))
+	if err != nil {
+		return err
+	} else if !nd.Attrs.Mode.IsRegular() {
+		return fuse.EINVAL
+	} else if _, err := nd.WriteAt(op.Data, op.Offset); err != nil {
+		return err
+	}
+
+	return commit(fs.nm, nd)
+}
+
+func (fs *filesystem) SyncFile(ctx context.Context, op *fuseops.SyncFileOp) error {
+	return nil
+}
+
+func (fs *filesystem) FlushFile(ctx context.Context, op *fuseops.FlushFileOp) error {
+	return nil
+}
+
+func (fs *filesystem) ReleaseFileHandle(ctx context.Context, op *fuseops.ReleaseFileHandleOp) error {
+	defer fs.synchronize()()
+
+	_, ok := fs.fileHandles[op.Handle]
+	if !ok {
+		return fmt.Errorf("failed to release unknown handle")
+	}
+	delete(fs.fileHandles, op.Handle)
+
+	return nil
+}
+
+func (fs *filesystem) mkNode(ctx context.Context, parentID fuseops.InodeID, name string, mode os.FileMode) (*node, *node, error) {
+	childPtr, err := fs.nm.Create(mode)
+	if err != nil {
+		return nil, nil, err
+	}
+	childID := fs.inode(childPtr)
+
+	parent, err := fs.nm.Open(fs.ptr(parentID))
+	if err != nil {
+		return nil, nil, err
+	} else if !parent.Attrs.Mode.IsDir() {
+		return nil, nil, fuse.ENOTDIR
+	} else if _, ok := parent.Children[name]; ok {
+		return nil, nil, fuse.EEXIST
+	}
+	parent.Attrs.Mtime = time.Now()
+	parent.Attrs.Ctime = time.Now()
+	parent.Children[name] = childID
+
+	child, err := fs.nm.Open(childPtr)
+	if err != nil {
+		return nil, nil, err
+	}
+	return parent, child, nil
 }
 
 func (fs *filesystem) synchronize() func() {
