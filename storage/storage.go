@@ -2,6 +2,7 @@
 package storage
 
 import (
+	"bytes"
 	"errors"
 
 	"github.com/Bren2010/utahfs"
@@ -119,7 +120,20 @@ func (c *cache) Get(key string) ([]byte, error) {
 	return data, nil
 }
 
+func (c *cache) skip(key string, data []byte) bool {
+	cand, ok := c.cache.Get(key)
+	if !ok {
+		return false
+	} else if !bytes.Equal(cand.([]byte), data) {
+		return false
+	}
+	return true
+}
+
 func (c *cache) Set(key string, data []byte) error {
+	if c.skip(key, data) {
+		return nil
+	}
 	c.cache.Remove(key)
 	if err := c.base.Set(key, data); err != nil {
 		return err
