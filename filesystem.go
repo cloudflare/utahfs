@@ -128,16 +128,16 @@ func (fs *filesystem) LookUpInode(ctx context.Context, op *fuseops.LookUpInodeOp
 	} else if nd.Children == nil {
 		return fuse.ENOTDIR
 	}
-	childId, ok := nd.Children[op.Name]
+	childID, ok := nd.Children[op.Name]
 	if !ok {
 		return fuse.ENOENT
 	}
-	child, err := fs.nm.Open(fs.ptr(childId))
+	child, err := fs.nm.Open(fs.ptr(childID))
 	if err != nil {
 		return err
 	}
 
-	op.Entry.Child = childId
+	op.Entry.Child = childID
 	op.Entry.Attributes = child.Attrs
 	op.Entry.AttributesExpiration = fs.expiration()
 
@@ -179,33 +179,12 @@ func (fs *filesystem) SetInodeAttributes(ctx context.Context, op *fuseops.SetIno
 	}
 	// Silently ignore updates to mode and atime.
 
+	if op.Size != nil || op.Mtime != nil {
+		nd.Attrs.Ctime = time.Now()
+	}
+
 	return commit(fs.nm, nd)
 }
-
-// func (fs *filesystem) ForgetInode(ctx context.Context, op *fuseops.ForgetInodeOp) error {
-// 	defer fs.synchronize()()
-//
-// 	n, m := fs.refs[op.Inode], int(op.N)
-// 	if n < m {
-// 		panic(fmt.Sprintf("n is greater than lookup count: %v vs %v", n, m))
-// 	} else if n > m {
-// 		fs.refs[op.Inode] = n - m
-// 		return nil
-// 	} // else n == m
-//
-// 	delete(fs.refs, op.Inode)
-//
-// 	nd, err := fs.nm.Open(fs.ptr(op.Inode))
-// 	if err != nil {
-// 		return err
-// 	} else if nd.Attrs.Nlink > 0 {
-// 		return nil
-// 	} else if err := fs.nm.Unlink(fs.ptr(op.Inode)); err != nil {
-// 		return err
-// 	}
-//
-// 	return commit(fs.nm)
-// }
 
 func (fs *filesystem) MkDir(ctx context.Context, op *fuseops.MkDirOp) error {
 	defer fs.synchronize()()
@@ -214,7 +193,7 @@ func (fs *filesystem) MkDir(ctx context.Context, op *fuseops.MkDirOp) error {
 	if err != nil {
 		return err
 	}
-	childId := fs.inode(childPtr)
+	childID := fs.inode(childPtr)
 
 	parent, err := fs.nm.Open(fs.ptr(op.Parent))
 	if err != nil {
@@ -224,15 +203,55 @@ func (fs *filesystem) MkDir(ctx context.Context, op *fuseops.MkDirOp) error {
 	} else if _, ok := parent.Children[op.Name]; ok {
 		return fuse.EEXIST
 	}
-	parent.Children[op.Name] = childId
+	parent.Attrs.Mtime = time.Now()
+	parent.Attrs.Ctime = time.Now()
+	parent.Children[op.Name] = childID
 
 	child, err := fs.nm.Open(childPtr)
 	if err != nil {
 		return err
 	}
-	op.Entry.Child = childId
+	op.Entry.Child = childID
 	op.Entry.Attributes = child.Attrs
 	op.Entry.AttributesExpiration = fs.expiration()
+
+	return commit(fs.nm, parent)
+}
+
+func (fs *filesystem) RmDir(ctx context.Context, op *fuseops.RmDirOp) error {
+	defer fs.synchronize()()
+
+	parent, err := fs.nm.Open(fs.ptr(op.Parent))
+	if err != nil {
+		return err
+	} else if !parent.Attrs.Mode.IsDir() {
+		return fuse.ENOTDIR
+	}
+	childID, ok := parent.Children[op.Name]
+	if !ok {
+		return fuse.ENOENT
+	}
+	parent.Attrs.Mtime = time.Now()
+	parent.Attrs.Ctime = time.Now()
+	delete(parent.Children, op.Name)
+
+	child, err := fs.nm.Open(fs.ptr(childID))
+	if err != nil {
+		return err
+	} else if len(child.Children) > 0 {
+		return fuse.ENOTEMPTY
+	}
+	child.Attrs.Nlink--
+	if child.Attrs.Nlink == 0 {
+		if err := fs.nm.Unlink(fs.ptr(childID)); err != nil {
+			return err
+		}
+	} else {
+		child.Attrs.Ctime = time.Now()
+		if err := child.Persist(); err != nil {
+			return err
+		}
+	}
 
 	return commit(fs.nm, parent)
 }
@@ -257,14 +276,14 @@ func (fs *filesystem) OpenDir(ctx context.Context, op *fuseops.OpenDirOp) error 
 
 	entries := make([]fuseutil.Dirent, 0, len(nd.Children))
 	for i, name := range names {
-		childId := nd.Children[name]
+		childID := nd.Children[name]
 
-		child, err := fs.nm.Open(fs.ptr(childId))
+		child, err := fs.nm.Open(fs.ptr(childID))
 		if err != nil {
 			return fmt.Errorf("failed to open inode for child")
 		}
 		entries = append(entries, fuseutil.Dirent{
-			fuseops.DirOffset(i + 1), childId, name, child.Type(),
+			fuseops.DirOffset(i + 1), childID, name, child.Type(),
 		})
 	}
 
