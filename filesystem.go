@@ -255,39 +255,57 @@ func (fs *filesystem) CreateSymlink(ctx context.Context, op *fuseops.CreateSymli
 	return commit(fs.nm, parent, child)
 }
 
+func (fs *filesystem) Rename(ctx context.Context, op *fuseops.RenameOp) error {
+	defer fs.synchronize()()
+
+	if op.OldParent == op.NewParent && op.OldName == op.NewName {
+		return nil
+	}
+
+	oldParent, err := fs.nm.Open(fs.ptr(op.OldParent))
+	if err != nil {
+		return err
+	}
+	id, ok := oldParent.Children[op.OldName]
+	if !ok {
+		return fuse.ENOENT
+	}
+
+	if op.NewParent == id {
+		return fuse.EINVAL
+	}
+	newParent, err := fs.nm.Open(fs.ptr(op.NewParent))
+	if err != nil {
+		return err
+	} else if _, ok := newParent.Children[op.NewName]; ok {
+		if err := fs.rmNode(ctx, newParent, op.NewName); err != nil {
+			return err
+		}
+	}
+
+	if op.OldParent == op.NewParent {
+		delete(newParent.Children, op.OldName)
+		newParent.Children[op.NewName] = id
+	} else {
+		delete(oldParent.Children, op.OldName)
+		newParent.Children[op.NewName] = id
+	}
+
+	return commit(fs.nm, oldParent, newParent)
+}
+
 func (fs *filesystem) RmDir(ctx context.Context, op *fuseops.RmDirOp) error {
+	return fs.Unlink(ctx, &fuseops.UnlinkOp{op.Parent, op.Name})
+}
+
+func (fs *filesystem) Unlink(ctx context.Context, op *fuseops.UnlinkOp) error {
 	defer fs.synchronize()()
 
 	parent, err := fs.nm.Open(fs.ptr(op.Parent))
 	if err != nil {
 		return err
-	} else if !parent.Attrs.Mode.IsDir() {
-		return fuse.ENOTDIR
-	}
-	childID, ok := parent.Children[op.Name]
-	if !ok {
-		return fuse.ENOENT
-	}
-	parent.Attrs.Mtime = time.Now()
-	parent.Attrs.Ctime = time.Now()
-	delete(parent.Children, op.Name)
-
-	child, err := fs.nm.Open(fs.ptr(childID))
-	if err != nil {
+	} else if err := fs.rmNode(ctx, parent, op.Name); err != nil {
 		return err
-	} else if len(child.Children) > 0 {
-		return fuse.ENOTEMPTY
-	}
-	child.Attrs.Nlink--
-	if child.Attrs.Nlink == 0 {
-		if err := fs.nm.Unlink(fs.ptr(childID)); err != nil {
-			return err
-		}
-	} else {
-		child.Attrs.Ctime = time.Now()
-		if err := child.Persist(); err != nil {
-			return err
-		}
 	}
 
 	return commit(fs.nm, parent)
@@ -443,6 +461,24 @@ func (fs *filesystem) ReleaseFileHandle(ctx context.Context, op *fuseops.Release
 	return nil
 }
 
+func (fs *filesystem) ReadSymlink(ctx context.Context, op *fuseops.ReadSymlinkOp) error {
+	defer fs.synchronize()()
+
+	nd, err := fs.nm.Open(fs.ptr(op.Inode))
+	if err != nil {
+		return err
+	} else if nd.Attrs.Mode&os.ModeSymlink != os.ModeSymlink {
+		return fuse.EINVAL
+	}
+	target, err := nd.ReadAll()
+	if err != nil {
+		return err
+	}
+	op.Target = string(target)
+
+	return nil
+}
+
 func (fs *filesystem) mkNode(ctx context.Context, parentID fuseops.InodeID, name string, mode os.FileMode) (*node, *node, error) {
 	childPtr, err := fs.nm.Create(mode)
 	if err != nil {
@@ -467,6 +503,36 @@ func (fs *filesystem) mkNode(ctx context.Context, parentID fuseops.InodeID, name
 		return nil, nil, err
 	}
 	return parent, child, nil
+}
+
+func (fs *filesystem) rmNode(ctx context.Context, parent *node, name string) error {
+	childID, ok := parent.Children[name]
+	if !ok {
+		return fuse.ENOENT
+	}
+	parent.Attrs.Mtime = time.Now()
+	parent.Attrs.Ctime = time.Now()
+	delete(parent.Children, name)
+
+	child, err := fs.nm.Open(fs.ptr(childID))
+	if err != nil {
+		return err
+	} else if len(child.Children) > 0 {
+		return fuse.ENOTEMPTY
+	}
+	child.Attrs.Nlink--
+	if child.Attrs.Nlink == 0 {
+		if err := fs.nm.Unlink(fs.ptr(childID)); err != nil {
+			return err
+		}
+	} else {
+		child.Attrs.Ctime = time.Now()
+		if err := child.Persist(); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (fs *filesystem) synchronize() func() {
