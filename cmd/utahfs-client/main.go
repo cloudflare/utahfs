@@ -24,9 +24,9 @@ func main() {
 		log.Fatalf("failed to parse mount path")
 	}
 
-	store, err := storage.NewB2(
-		os.Getenv("B2_ACCT_ID"), os.Getenv("B2_APP_KEY"),
-		os.Getenv("B2_BUCKET"), os.Getenv("B2_URL"),
+	store, err := storage.NewS3(
+		os.Getenv("S3_APP_ID"), os.Getenv("S3_APP_KEY"),
+		os.Getenv("S3_BUCKET"), os.Getenv("S3_URL"), os.Getenv("S3_REGION"),
 	)
 	if err != nil {
 		log.Fatal(err)
