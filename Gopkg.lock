@@ -3,19 +3,19 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:ec7d53f6a305d941765e04bfc841094e194df04b6521258fb517a36df7454e2e"
-  name = "github.com/billziss-gh/cgofuse"
-  packages = ["fuse"]
-  pruneopts = "UT"
-  revision = "dd0c76f07d34a74e62f4dd700ebe09a44925900c"
-
-[[projects]]
-  branch = "master"
   digest = "1:1ba1d79f2810270045c328ae5d674321db34e3aae468eb4233883b473c5c0467"
   name = "github.com/golang/glog"
   packages = ["."]
   pruneopts = "UT"
   revision = "23def4e6c14b4da8ac2ed8007337bc5eb5007998"
+
+[[projects]]
+  digest = "1:e4f5819333ac698d294fe04dbf640f84719658d5c7ce195b10060cc37292ce79"
+  name = "github.com/golang/snappy"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "2a8bb927dd31d8daada140a5d09578521ce5c36a"
+  version = "v0.0.1"
 
 [[projects]]
   branch = "master"
@@ -38,6 +38,21 @@
 
 [[projects]]
   branch = "master"
+  digest = "1:c19183ee1bc01433c61d026972e83a479816ffb00f29c8d7605b0668d4bdea8c"
+  name = "github.com/jacobsa/fuse"
+  packages = [
+    ".",
+    "fuseops",
+    "fuseutil",
+    "internal/buffer",
+    "internal/freelist",
+    "internal/fusekernel",
+  ]
+  pruneopts = "UT"
+  revision = "cd3959611bcb6bb23d49f1598d98f2bf44476805"
+
+[[projects]]
+  branch = "master"
   digest = "1:63987b971c0f3240a0f1eed70b80b360e6a57d7a8c85ed7daa8bf770319ab308"
   name = "github.com/pquerna/ffjson"
   packages = [
@@ -47,6 +62,27 @@
   ]
   pruneopts = "UT"
   revision = "e517b90714f7c0eabe6d2e570a5886ae077d6db6"
+
+[[projects]]
+  digest = "1:5b180f17d5bc50b765f4dcf0d126c72979531cbbd7f7929bf3edd87fb801ea2d"
+  name = "github.com/syndtr/goleveldb"
+  packages = [
+    "leveldb",
+    "leveldb/cache",
+    "leveldb/comparer",
+    "leveldb/errors",
+    "leveldb/filter",
+    "leveldb/iterator",
+    "leveldb/journal",
+    "leveldb/memdb",
+    "leveldb/opt",
+    "leveldb/storage",
+    "leveldb/table",
+    "leveldb/util",
+  ]
+  pruneopts = "UT"
+  revision = "9d007e481048296f09f59bd19bb7ae584563cd95"
+  version = "v1.0.0"
 
 [[projects]]
   branch = "master"
@@ -60,8 +96,13 @@
   analyzer-name = "dep"
   analyzer-version = 1
   input-imports = [
-    "github.com/billziss-gh/cgofuse/fuse",
     "github.com/hashicorp/golang-lru",
+    "github.com/jacobsa/fuse",
+    "github.com/jacobsa/fuse/fuseops",
+    "github.com/jacobsa/fuse/fuseutil",
+    "github.com/syndtr/goleveldb/leveldb",
+    "github.com/syndtr/goleveldb/leveldb/opt",
+    "github.com/syndtr/goleveldb/leveldb/util",
     "gopkg.in/kothar/go-backblaze.v0",
   ]
   solver-name = "gps-cdcl"

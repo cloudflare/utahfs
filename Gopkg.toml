@@ -1,6 +1,14 @@
 [[constraint]]
+  name = "github.com/hashicorp/golang-lru"
+  version = "0.5.1"
+
+[[constraint]]
   branch = "master"
-  name = "github.com/billziss-gh/cgofuse"
+  name = "github.com/jacobsa/fuse"
+
+[[constraint]]
+  name = "github.com/syndtr/goleveldb"
+  version = "1.0.0"
 
 [[constraint]]
   branch = "master"
