@@ -3,6 +3,7 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"errors"
 
 	"github.com/Bren2010/utahfs"
@@ -27,7 +28,7 @@ func NewMemory() utahfs.ObjectStorage {
 	return make(memory)
 }
 
-func (m memory) Get(key string) ([]byte, error) {
+func (m memory) Get(ctx context.Context, key string) ([]byte, error) {
 	data, ok := m[key]
 	if !ok {
 		return nil, utahfs.ErrObjectNotFound
@@ -35,12 +36,12 @@ func (m memory) Get(key string) ([]byte, error) {
 	return dup(data), nil
 }
 
-func (m memory) Set(key string, data []byte) error {
+func (m memory) Set(ctx context.Context, key string, data []byte) error {
 	m[key] = dup(data)
 	return nil
 }
 
-func (m memory) Delete(key string) error {
+func (m memory) Delete(ctx context.Context, key string) error {
 	delete(m, key)
 	return nil
 }
@@ -59,9 +60,9 @@ func NewRetry(base utahfs.ObjectStorage, attempts int) (utahfs.ObjectStorage, er
 	return &retry{base, attempts}, nil
 }
 
-func (r *retry) Get(key string) (data []byte, err error) {
+func (r *retry) Get(ctx context.Context, key string) (data []byte, err error) {
 	for i := 0; i < r.attempts; i++ {
-		data, err = r.base.Get(key)
+		data, err = r.base.Get(ctx, key)
 		if err == nil || err == utahfs.ErrObjectNotFound {
 			return
 		}
@@ -70,9 +71,9 @@ func (r *retry) Get(key string) (data []byte, err error) {
 	return
 }
 
-func (r *retry) Set(key string, data []byte) (err error) {
+func (r *retry) Set(ctx context.Context, key string, data []byte) (err error) {
 	for i := 0; i < r.attempts; i++ {
-		err = r.base.Set(key, data)
+		err = r.base.Set(ctx, key, data)
 		if err == nil {
 			return
 		}
@@ -81,9 +82,9 @@ func (r *retry) Set(key string, data []byte) (err error) {
 	return
 }
 
-func (r *retry) Delete(key string) (err error) {
+func (r *retry) Delete(ctx context.Context, key string) (err error) {
 	for i := 0; i < r.attempts; i++ {
-		err = r.base.Delete(key)
+		err = r.base.Delete(ctx, key)
 		if err == nil {
 			return
 		}
@@ -107,12 +108,12 @@ func NewCache(base utahfs.ObjectStorage, size int) (utahfs.ObjectStorage, error)
 	return &cache{base, c}, nil
 }
 
-func (c *cache) Get(key string) ([]byte, error) {
+func (c *cache) Get(ctx context.Context, key string) ([]byte, error) {
 	val, ok := c.cache.Get(key)
 	if ok {
 		return dup(val.([]byte)), nil
 	}
-	data, err := c.base.Get(key)
+	data, err := c.base.Get(ctx, key)
 	if err != nil {
 		return nil, err
 	}
@@ -130,19 +131,19 @@ func (c *cache) skip(key string, data []byte) bool {
 	return true
 }
 
-func (c *cache) Set(key string, data []byte) error {
+func (c *cache) Set(ctx context.Context, key string, data []byte) error {
 	if c.skip(key, data) {
 		return nil
 	}
 	c.cache.Remove(key)
-	if err := c.base.Set(key, data); err != nil {
+	if err := c.base.Set(ctx, key, data); err != nil {
 		return err
 	}
 	c.cache.Add(key, dup(data))
 	return nil
 }
 
-func (c *cache) Delete(key string) error {
+func (c *cache) Delete(ctx context.Context, key string) error {
 	c.cache.Remove(key)
-	return c.base.Delete(key)
+	return c.base.Delete(ctx, key)
 }

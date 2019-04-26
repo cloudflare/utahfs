@@ -1,6 +1,7 @@
 package utahfs
 
 import (
+	"context"
 	"encoding/gob"
 	"io"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 type node struct {
 	bfs *BlockFilesystem
+	ctx context.Context
 
 	self *BlockFile
 	data *BlockFile
@@ -27,7 +29,7 @@ func (nd *node) open(create bool) error {
 		return nil
 	} else if nd.Data == nilPtr {
 		if create {
-			ptr, bf, err := nd.bfs.Create()
+			ptr, bf, err := nd.bfs.Create(nd.ctx)
 			if err != nil {
 				return err
 			}
@@ -37,7 +39,7 @@ func (nd *node) open(create bool) error {
 		return io.EOF
 	}
 
-	bf, err := nd.bfs.Open(nd.Data)
+	bf, err := nd.bfs.Open(nd.ctx, nd.Data)
 	if err != nil {
 		return err
 	}
@@ -190,13 +192,13 @@ func newNodeManager(store AppStorage, bfs *BlockFilesystem, cacheSize int, uid, 
 	}, nil
 }
 
-func (nm *nodeManager) Start() error  { return nm.store.Start() }
-func (nm *nodeManager) Commit() error { return nm.store.Commit() }
-func (nm *nodeManager) Rollback()     { nm.store.Rollback() }
+func (nm *nodeManager) Start(ctx context.Context) error  { return nm.store.Start(ctx) }
+func (nm *nodeManager) Commit(ctx context.Context) error { return nm.store.Commit(ctx) }
+func (nm *nodeManager) Rollback(ctx context.Context)     { nm.store.Rollback(ctx) }
 
 func (nm *nodeManager) State() (*State, error) { return nm.store.State() }
 
-func (nm *nodeManager) Create(mode os.FileMode) (uint32, error) {
+func (nm *nodeManager) Create(ctx context.Context, mode os.FileMode) (uint32, error) {
 	now := time.Now()
 	nd := node{
 		Attrs: fuseops.InodeAttributes{
@@ -218,7 +220,7 @@ func (nm *nodeManager) Create(mode os.FileMode) (uint32, error) {
 		nd.Children = make(map[string]fuseops.InodeID)
 	}
 
-	ptr, bf, err := nm.bfs.Create()
+	ptr, bf, err := nm.bfs.Create(ctx)
 	if err != nil {
 		return nilPtr, err
 	} else if err := gob.NewEncoder(bf).Encode(nd); err != nil {
@@ -227,12 +229,12 @@ func (nm *nodeManager) Create(mode os.FileMode) (uint32, error) {
 	return ptr, nil
 }
 
-func (nm *nodeManager) Open(ptr uint32) (*node, error) {
+func (nm *nodeManager) Open(ctx context.Context, ptr uint32) (*node, error) {
 	if nd, ok := nm.cache.Get(ptr); ok {
 		return nd.(*node), nil
 	}
 
-	bf, err := nm.bfs.Open(ptr)
+	bf, err := nm.bfs.Open(ctx, ptr)
 	if err != nil {
 		return nil, err
 	}
@@ -240,6 +242,7 @@ func (nm *nodeManager) Open(ptr uint32) (*node, error) {
 	if err := gob.NewDecoder(bf).Decode(nd); err != nil {
 		return nil, err
 	}
+	nd.ctx = ctx
 	nd.bfs = nm.bfs
 	nd.self = bf
 	nd.Attrs.Uid = nm.uid
@@ -249,14 +252,14 @@ func (nm *nodeManager) Open(ptr uint32) (*node, error) {
 	return nd, nil
 }
 
-func (nm *nodeManager) Unlink(ptr uint32) error {
-	nd, err := nm.Open(ptr)
+func (nm *nodeManager) Unlink(ctx context.Context, ptr uint32) error {
+	nd, err := nm.Open(ctx, ptr)
 	if err != nil {
 		return err
-	} else if err := nm.bfs.Unlink(uint32(ptr)); err != nil {
+	} else if err := nm.bfs.Unlink(ctx, uint32(ptr)); err != nil {
 		return err
 	} else if nd.Data != nilPtr {
-		return nm.bfs.Unlink(nd.Data)
+		return nm.bfs.Unlink(ctx, nd.Data)
 	}
 	return nil
 }

@@ -1,6 +1,7 @@
 package utahfs
 
 import (
+	"context"
 	"fmt"
 	"io"
 )
@@ -14,8 +15,8 @@ var errEndOfBlock = fmt.Errorf("blockfs: reached end of block")
 type BlockStorage interface {
 	State() (*State, error)
 
-	Get(ptr uint32) (data []byte, err error)
-	Set(ptr uint32, data []byte) (err error)
+	Get(ctx context.Context, ptr uint32) (data []byte, err error)
+	Set(ctx context.Context, ptr uint32, data []byte) (err error)
 }
 
 type basicBlockStorage struct {
@@ -33,12 +34,12 @@ func (bbs basicBlockStorage) State() (*State, error) {
 	return bbs.base.State()
 }
 
-func (bbs basicBlockStorage) Get(ptr uint32) ([]byte, error) {
-	return bbs.base.Get(fmt.Sprintf("%x", ptr))
+func (bbs basicBlockStorage) Get(ctx context.Context, ptr uint32) ([]byte, error) {
+	return bbs.base.Get(ctx, fmt.Sprintf("%x", ptr))
 }
 
-func (bbs basicBlockStorage) Set(ptr uint32, data []byte) error {
-	return bbs.base.Set(fmt.Sprintf("%x", ptr), data)
+func (bbs basicBlockStorage) Set(ctx context.Context, ptr uint32, data []byte) error {
+	return bbs.base.Set(ctx, fmt.Sprintf("%x", ptr), data)
 }
 
 // BlockFilesystem implements large files as skiplists over fixed-size blocks
@@ -80,7 +81,7 @@ func NewBlockFilesystem(store BlockStorage, numPtrs, dataSize int64) (*BlockFile
 func (bfs *BlockFilesystem) blockSize() int64 { return 4*bfs.numPtrs + 3 + bfs.dataSize }
 
 // allocate returns the pointer of a block which is free for use by the caller.
-func (bfs *BlockFilesystem) allocate() (uint32, error) {
+func (bfs *BlockFilesystem) allocate(ctx context.Context) (uint32, error) {
 	state, err := bfs.store.State()
 	if err != nil {
 		return nilPtr, err
@@ -90,7 +91,7 @@ func (bfs *BlockFilesystem) allocate() (uint32, error) {
 		return next, nil
 	}
 
-	data, err := bfs.store.Get(state.TrashPtr)
+	data, err := bfs.store.Get(ctx, state.TrashPtr)
 	if err != nil {
 		return nilPtr, err
 	}
@@ -106,8 +107,8 @@ func (bfs *BlockFilesystem) allocate() (uint32, error) {
 
 // Create creates a new file. It returns the pointer to the file and an open
 // copy.
-func (bfs *BlockFilesystem) Create() (uint32, *BlockFile, error) {
-	ptr, err := bfs.allocate()
+func (bfs *BlockFilesystem) Create(ctx context.Context) (uint32, *BlockFile, error) {
+	ptr, err := bfs.allocate(ctx)
 	if err != nil {
 		return nilPtr, nil, err
 	}
@@ -120,6 +121,7 @@ func (bfs *BlockFilesystem) Create() (uint32, *BlockFile, error) {
 
 	bf := &BlockFile{
 		parent: bfs,
+		ctx:    ctx,
 
 		start: ptr,
 		size:  0,
@@ -137,9 +139,10 @@ func (bfs *BlockFilesystem) Create() (uint32, *BlockFile, error) {
 }
 
 // Open returns a handle to an existing file.
-func (bfs *BlockFilesystem) Open(ptr uint32) (*BlockFile, error) {
+func (bfs *BlockFilesystem) Open(ctx context.Context, ptr uint32) (*BlockFile, error) {
 	bf := &BlockFile{
 		parent: bfs,
+		ctx:    ctx,
 
 		start: ptr,
 		size:  0,
@@ -153,8 +156,8 @@ func (bfs *BlockFilesystem) Open(ptr uint32) (*BlockFile, error) {
 
 // Unlink allows the blocks allocated for a file to be re-used for other
 // purposes.
-func (bfs *BlockFilesystem) Unlink(ptr uint32) error {
-	bf, err := bfs.Open(ptr)
+func (bfs *BlockFilesystem) Unlink(ctx context.Context, ptr uint32) error {
+	bf, err := bfs.Open(ctx, ptr)
 	if err != nil {
 		return err
 	}
@@ -196,6 +199,7 @@ func (bfs *BlockFilesystem) Unlink(ptr uint32) error {
 // a skiplist of fixed-size blocks.
 type BlockFile struct {
 	parent *BlockFilesystem
+	ctx    context.Context
 
 	// start points to the first block of the file.
 	start uint32
@@ -214,13 +218,13 @@ type BlockFile struct {
 
 // persist saves any changes to the current block to the storage backend.
 func (bf *BlockFile) persist() error {
-	return bf.parent.store.Set(bf.ptr, bf.curr.Marshal())
+	return bf.parent.store.Set(bf.ctx, bf.ptr, bf.curr.Marshal())
 }
 
 // load pulls the block at `ptr` into memory. `pos` is our new position in the
 // file.
 func (bf *BlockFile) load(ptr uint32, pos int64) error {
-	data, err := bf.parent.store.Get(ptr)
+	data, err := bf.parent.store.Get(bf.ctx, ptr)
 	if err != nil {
 		return err
 	}
@@ -311,7 +315,7 @@ func (bf *BlockFile) write(p []byte) (int, error) {
 
 	// There is no next block. We have to create it. First thing is to change
 	// the format of the current block from a tail to an intermediate.
-	ptr, err := bf.parent.allocate()
+	ptr, err := bf.parent.allocate(bf.ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -475,7 +479,7 @@ func (bf *BlockFile) Truncate(size int64) error {
 	if _, err := bf.Seek(endIdx*bf.parent.dataSize, io.SeekStart); err != nil {
 		return err
 	} else if bf.curr.ptrs[0] != nilPtr {
-		if err := bf.parent.Unlink(bf.curr.ptrs[0]); err != nil {
+		if err := bf.parent.Unlink(bf.ctx, bf.curr.ptrs[0]); err != nil {
 			return err
 		}
 	}

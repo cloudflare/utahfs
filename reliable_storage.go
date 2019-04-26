@@ -2,6 +2,7 @@ package utahfs
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log"
 	"sync"
@@ -14,8 +15,8 @@ import (
 
 type reliableStorage interface {
 	Start() error
-	Get(key string) (data []byte, err error)
-	Commit(writes map[string][]byte) error
+	Get(ctx context.Context, key string) (data []byte, err error)
+	Commit(ctx context.Context, writes map[string][]byte) error
 }
 
 type simpleStorage struct {
@@ -30,13 +31,13 @@ func NewSimpleStorage(store ObjectStorage) AppStorage {
 
 func (ss *simpleStorage) Start() error { return nil }
 
-func (ss *simpleStorage) Get(key string) ([]byte, error) {
-	return ss.store.Get(key)
+func (ss *simpleStorage) Get(ctx context.Context, key string) ([]byte, error) {
+	return ss.store.Get(ctx, key)
 }
 
-func (ss *simpleStorage) Commit(writes map[string][]byte) error {
+func (ss *simpleStorage) Commit(ctx context.Context, writes map[string][]byte) error {
 	for key, val := range writes {
-		if err := ss.store.Set(key, val); err != nil {
+		if err := ss.store.Set(ctx, key, val); err != nil {
 			panic(err)
 		}
 	}
@@ -97,11 +98,11 @@ func (lw *localWAL) drainOnce() error {
 		key, val := iter.Key(), iter.Value()
 
 		if val != nil {
-			if err := lw.remote.Set(string(key), val); err != nil {
+			if err := lw.remote.Set(context.Background(), string(key), val); err != nil {
 				return err
 			}
 		} else {
-			if err := lw.remote.Delete(string(key)); err != nil {
+			if err := lw.remote.Delete(context.Background(), string(key)); err != nil {
 				return err
 			}
 		}
@@ -160,10 +161,10 @@ func (lw *localWAL) Start() error {
 	return fmt.Errorf("wal: timed out waiting for buffered changes to drain")
 }
 
-func (lw *localWAL) Get(key string) ([]byte, error) {
+func (lw *localWAL) Get(ctx context.Context, key string) ([]byte, error) {
 	data, err := lw.local.Get([]byte(key), nil)
 	if err == leveldb.ErrNotFound {
-		return lw.remote.Get(key)
+		return lw.remote.Get(ctx, key)
 	} else if data == nil {
 		return nil, ErrObjectNotFound
 	} else if err != nil {
@@ -172,7 +173,7 @@ func (lw *localWAL) Get(key string) ([]byte, error) {
 	return data, nil
 }
 
-func (lw *localWAL) Commit(writes map[string][]byte) error {
+func (lw *localWAL) Commit(ctx context.Context, writes map[string][]byte) error {
 	if len(writes) == 0 {
 		return nil
 	}

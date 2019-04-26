@@ -2,6 +2,7 @@ package utahfs
 
 import (
 	"bytes"
+	"context"
 	"encoding/gob"
 	"fmt"
 )
@@ -44,7 +45,7 @@ type AppStorage interface {
 	// called.
 	//
 	// Transactions are isolated and atomic.
-	Start() error
+	Start(ctx context.Context) error
 
 	// State returns a map of shared global state. Consumers may modify the
 	// returned struct, and these modifications will be persisted after Commit
@@ -54,9 +55,9 @@ type AppStorage interface {
 	ObjectStorage
 
 	// Commit persists any changes made to the backend.
-	Commit() error
+	Commit(ctx context.Context) error
 	// Rollback discards all changes made in this transaction.
-	Rollback()
+	Rollback(ctx context.Context)
 }
 
 type changes struct {
@@ -86,7 +87,7 @@ func newAppStorage(store reliableStorage) *appStorage {
 	return &appStorage{store: store}
 }
 
-func (as *appStorage) Start() error {
+func (as *appStorage) Start(ctx context.Context) error {
 	if as.pending != nil {
 		return fmt.Errorf("app: transaction already started")
 	}
@@ -94,7 +95,7 @@ func (as *appStorage) Start() error {
 	if err := as.store.Start(); err != nil {
 		return err
 	}
-	raw, err := as.store.Get("state")
+	raw, err := as.store.Get(ctx, "state")
 	if err == ErrObjectNotFound {
 		as.pending = newChanges(newState())
 		return nil
@@ -121,7 +122,7 @@ func (as *appStorage) State() (*State, error) {
 	return as.pending.State, nil
 }
 
-func (as *appStorage) Get(key string) ([]byte, error) {
+func (as *appStorage) Get(ctx context.Context, key string) ([]byte, error) {
 	if as.pending == nil {
 		return nil, fmt.Errorf("app: transaction not active")
 	}
@@ -133,10 +134,10 @@ func (as *appStorage) Get(key string) ([]byte, error) {
 		}
 		return nil, ErrObjectNotFound
 	}
-	return as.store.Get(key)
+	return as.store.Get(ctx, key)
 }
 
-func (as *appStorage) Set(key string, data []byte) error {
+func (as *appStorage) Set(ctx context.Context, key string, data []byte) error {
 	if as.pending == nil {
 		return fmt.Errorf("app: transaction not active")
 	}
@@ -146,7 +147,7 @@ func (as *appStorage) Set(key string, data []byte) error {
 	return nil
 }
 
-func (as *appStorage) Delete(key string) error {
+func (as *appStorage) Delete(ctx context.Context, key string) error {
 	if as.pending == nil {
 		return fmt.Errorf("app: transaction not active")
 	}
@@ -156,7 +157,7 @@ func (as *appStorage) Delete(key string) error {
 	return nil
 }
 
-func (as *appStorage) Commit() error {
+func (as *appStorage) Commit(ctx context.Context) error {
 	if as.pending == nil {
 		return fmt.Errorf("app: transaction not active")
 	}
@@ -168,7 +169,7 @@ func (as *appStorage) Commit() error {
 		}
 		as.pending.Writes["state"] = buff.Bytes()
 	}
-	if err := as.store.Commit(as.pending.Writes); err != nil {
+	if err := as.store.Commit(ctx, as.pending.Writes); err != nil {
 		return err
 	}
 	as.pending = nil
@@ -176,7 +177,7 @@ func (as *appStorage) Commit() error {
 	return nil
 }
 
-func (as *appStorage) Rollback() {
-	as.store.Commit(nil)
+func (as *appStorage) Rollback(ctx context.Context) {
+	as.store.Commit(ctx, nil)
 	as.pending = nil
 }
