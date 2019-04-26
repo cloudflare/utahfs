@@ -120,6 +120,10 @@ func (nd *node) Truncate(size int64) error {
 		nd.Attrs.Size = uint64(nd.data.size)
 	}()
 
+	if uint64(size) > nd.Attrs.Size {
+		_, err := nd.data.Write(make([]byte, uint64(size)-nd.Attrs.Size))
+		return err
+	}
 	return nd.data.Truncate(size)
 }
 

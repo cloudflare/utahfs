@@ -24,26 +24,26 @@ func main() {
 		log.Fatalf("failed to parse mount path")
 	}
 
-	// store, err := storage.NewB2(
-	// 	os.Getenv("B2_ACCT_ID"), os.Getenv("B2_APP_KEY"),
-	// 	os.Getenv("B2_BUCKET"), os.Getenv("B2_URL"),
-	// )
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-	// store, err = storage.NewRetry(store, 3)
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-	// store, err = storage.NewCache(store, 512)
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-	// appStore, err := utahfs.NewLocalWAL(store, path.Join(pwd, "utahfs-wal"), 512)
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-	appStore := utahfs.NewSimpleStorage(storage.NewMemory())
+	store, err := storage.NewB2(
+		os.Getenv("B2_ACCT_ID"), os.Getenv("B2_APP_KEY"),
+		os.Getenv("B2_BUCKET"), os.Getenv("B2_URL"),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	store, err = storage.NewRetry(store, 3)
+	if err != nil {
+		log.Fatal(err)
+	}
+	store, err = storage.NewCache(store, 512)
+	if err != nil {
+		log.Fatal(err)
+	}
+	walPath := path.Join(path.Dir(flag.Arg(0)), "utahfs-wal")
+	appStore, err := utahfs.NewLocalWAL(store, walPath, 512)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	bs := utahfs.NewBasicBlockStorage(appStore)
 	bfs, err := utahfs.NewBlockFilesystem(bs, 12, 1024*1024)

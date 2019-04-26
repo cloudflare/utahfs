@@ -21,6 +21,10 @@ import (
 // github.com/GoogleCloudPlatform/gcsfuse. If some decision seems weird, it
 // might be justified in that codebase.
 
+func now() time.Time {
+	return time.Now().Round(time.Second)
+}
+
 func myUserAndGroup() (uint32, uint32, error) {
 	user, err := user.Current()
 	if err != nil {
@@ -176,13 +180,16 @@ func (fs *filesystem) SetInodeAttributes(ctx context.Context, op *fuseops.SetIno
 			return err
 		}
 	}
+	if op.Mode != nil {
+		nd.Attrs.Mode = *op.Mode
+	}
 	if op.Mtime != nil {
 		nd.Attrs.Mtime = *op.Mtime
 	}
-	// Silently ignore updates to mode and atime.
+	// Silently ignore updates to atime.
 
-	if op.Size != nil || op.Mtime != nil {
-		nd.Attrs.Ctime = time.Now()
+	if op.Size != nil || op.Mode != nil || op.Mtime != nil {
+		nd.Attrs.Ctime = now()
 	}
 
 	return commit(ctx, fs.nm, nd)
@@ -293,10 +300,10 @@ func (fs *filesystem) Rename(ctx context.Context, op *fuseops.RenameOp) error {
 		newParent.Children[op.NewName] = id
 	}
 
-	oldParent.Attrs.Mtime = time.Now()
-	oldParent.Attrs.Ctime = time.Now()
-	newParent.Attrs.Mtime = time.Now()
-	newParent.Attrs.Ctime = time.Now()
+	oldParent.Attrs.Mtime = now()
+	oldParent.Attrs.Ctime = now()
+	newParent.Attrs.Mtime = now()
+	newParent.Attrs.Ctime = now()
 
 	return commit(ctx, fs.nm, oldParent, newParent)
 }
@@ -444,7 +451,7 @@ func (fs *filesystem) WriteFile(ctx context.Context, op *fuseops.WriteFileOp) er
 	} else if _, err := nd.WriteAt(op.Data, op.Offset); err != nil {
 		return err
 	}
-	nd.Attrs.Mtime = time.Now()
+	nd.Attrs.Mtime = now()
 
 	return commit(ctx, fs.nm, nd)
 }
@@ -502,8 +509,8 @@ func (fs *filesystem) mkNode(ctx context.Context, parentID fuseops.InodeID, name
 	} else if _, ok := parent.Children[name]; ok {
 		return nil, nil, fuse.EEXIST
 	}
-	parent.Attrs.Mtime = time.Now()
-	parent.Attrs.Ctime = time.Now()
+	parent.Attrs.Mtime = now()
+	parent.Attrs.Ctime = now()
 	parent.Children[name] = childID
 
 	child, err := fs.nm.Open(ctx, childPtr)
@@ -518,8 +525,8 @@ func (fs *filesystem) rmNode(ctx context.Context, parent *node, name string) err
 	if !ok {
 		return fuse.ENOENT
 	}
-	parent.Attrs.Mtime = time.Now()
-	parent.Attrs.Ctime = time.Now()
+	parent.Attrs.Mtime = now()
+	parent.Attrs.Ctime = now()
 	delete(parent.Children, name)
 
 	child, err := fs.nm.Open(ctx, fs.ptr(childID))
@@ -534,7 +541,7 @@ func (fs *filesystem) rmNode(ctx context.Context, parent *node, name string) err
 			return err
 		}
 	} else {
-		child.Attrs.Ctime = time.Now()
+		child.Attrs.Ctime = now()
 		if err := child.Persist(); err != nil {
 			return err
 		}
@@ -568,5 +575,5 @@ func (fs *filesystem) inode(ptr uint32) fuseops.InodeID {
 }
 
 func (fs *filesystem) expiration() time.Time {
-	return time.Now().Add(time.Minute)
+	return now().Add(time.Minute)
 }
