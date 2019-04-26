@@ -291,6 +291,11 @@ func (fs *filesystem) Rename(ctx context.Context, op *fuseops.RenameOp) error {
 		newParent.Children[op.NewName] = id
 	}
 
+	oldParent.Mtime = time.Now()
+	oldParent.Ctime = time.Now()
+	newParent.Mtime = time.Now()
+	newParent.Ctime = time.Now()
+
 	return commit(fs.nm, oldParent, newParent)
 }
 
@@ -437,6 +442,7 @@ func (fs *filesystem) WriteFile(ctx context.Context, op *fuseops.WriteFileOp) er
 	} else if _, err := nd.WriteAt(op.Data, op.Offset); err != nil {
 		return err
 	}
+	nd.Mtime = time.Now()
 
 	return commit(fs.nm, nd)
 }
