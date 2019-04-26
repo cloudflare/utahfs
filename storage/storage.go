@@ -1,4 +1,4 @@
-// Package storage implements handlers for compatible object-storage backends.
+// Package storage implements several compatible object-storage backends.
 package storage
 
 import (
@@ -24,9 +24,7 @@ type memory map[string][]byte
 
 // NewMemory returns an object storage backend that simply stores data
 // in-memory.
-func NewMemory() utahfs.ObjectStorage {
-	return make(memory)
-}
+func NewMemory() utahfs.ObjectStorage { return make(memory) }
 
 func (m memory) Get(ctx context.Context, key string) ([]byte, error) {
 	data, ok := m[key]
@@ -123,12 +121,7 @@ func (c *cache) Get(ctx context.Context, key string) ([]byte, error) {
 
 func (c *cache) skip(key string, data []byte) bool {
 	cand, ok := c.cache.Get(key)
-	if !ok {
-		return false
-	} else if !bytes.Equal(cand.([]byte), data) {
-		return false
-	}
-	return true
+	return ok && bytes.Equal(cand.([]byte), data)
 }
 
 func (c *cache) Set(ctx context.Context, key string, data []byte) error {

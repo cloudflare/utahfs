@@ -234,8 +234,13 @@ func (nm *nodeManager) Create(ctx context.Context, mode os.FileMode) (uint32, er
 }
 
 func (nm *nodeManager) Open(ctx context.Context, ptr uint32) (*node, error) {
-	if nd, ok := nm.cache.Get(ptr); ok {
-		return nd.(*node), nil
+	if val, ok := nm.cache.Get(ptr); ok {
+		nd := val.(*node)
+		nd.ctx, nd.self.ctx = ctx, ctx
+		if nd.data != nil {
+			nd.data.ctx = ctx
+		}
+		return nd, nil
 	}
 
 	bf, err := nm.bfs.Open(ctx, ptr)

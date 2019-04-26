@@ -92,7 +92,7 @@ func (as *appStorage) Start(ctx context.Context) error {
 		return fmt.Errorf("app: transaction already started")
 	}
 
-	if err := as.store.Start(); err != nil {
+	if err := as.store.Start(ctx); err != nil {
 		return err
 	}
 	raw, err := as.store.Get(ctx, "state")

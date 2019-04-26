@@ -80,8 +80,7 @@ func (b *b2) Set(ctx context.Context, key string, data []byte) error {
 	bucket, err := b.conn.Bucket(b.bucket)
 	if err != nil {
 		return err
-	}
-	if _, err := bucket.UploadFile(key, meta, buff); err != nil {
+	} else if _, err := bucket.UploadFile(key, meta, buff); err != nil {
 		return err
 	}
 
@@ -92,8 +91,7 @@ func (b *b2) Delete(ctx context.Context, key string) error {
 	bucket, err := b.conn.Bucket(b.bucket)
 	if err != nil {
 		return err
-	}
-	if _, err := bucket.HideFile(key); err != nil {
+	} else if _, err := bucket.HideFile(key); err != nil {
 		return err
 	}
 

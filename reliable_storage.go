@@ -3,7 +3,6 @@ package utahfs
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -14,7 +13,7 @@ import (
 )
 
 type reliableStorage interface {
-	Start() error
+	Start(ctx context.Context) error
 	Get(ctx context.Context, key string) (data []byte, err error)
 	Commit(ctx context.Context, writes map[string][]byte) error
 }
@@ -29,7 +28,7 @@ func NewSimpleStorage(store ObjectStorage) AppStorage {
 	return newAppStorage(&simpleStorage{store})
 }
 
-func (ss *simpleStorage) Start() error { return nil }
+func (ss *simpleStorage) Start(ctx context.Context) error { return nil }
 
 func (ss *simpleStorage) Get(ctx context.Context, key string) ([]byte, error) {
 	return ss.store.Get(ctx, key)
@@ -50,8 +49,10 @@ type localWAL struct {
 	remote ObjectStorage
 	local  *leveldb.DB
 
-	wake    chan struct{}
-	maxSize int
+	maxSize   int
+	currSize  int
+	lastCount time.Time
+	wake      chan struct{}
 }
 
 // NewLocalWAL returns an AppStorage implementation that achieves reliable
@@ -69,8 +70,10 @@ func NewLocalWAL(remote ObjectStorage, path string, maxSize int) (AppStorage, er
 		remote: remote,
 		local:  local,
 
-		wake:    make(chan struct{}),
-		maxSize: maxSize,
+		maxSize:   maxSize,
+		currSize:  0,
+		lastCount: time.Time{},
+		wake:      make(chan struct{}),
 	}
 	go wal.drain()
 
@@ -133,32 +136,54 @@ func (lw *localWAL) drop(key, val []byte) error {
 	return lw.local.Delete(key, nil)
 }
 
-func (lw *localWAL) Start() error {
-	// Block until the database has drained enough to accept new writes.
-	for i := 0; i < 10; i++ {
-		count := 0
+func (lw *localWAL) count() (int, error) {
+	if time.Since(lw.lastCount) < 10*time.Second {
+		lw.mu.Lock()
+		curr := lw.currSize
+		lw.mu.Unlock()
+		return curr, nil
+	}
 
-		iter := lw.local.NewIterator(&util.Range{nil, nil}, nil)
-		for iter.Next() {
-			count++
-		}
-		iter.Release()
-		if err := iter.Error(); err != nil {
+	count := 0
+	iter := lw.local.NewIterator(&util.Range{nil, nil}, nil)
+	for iter.Next() {
+		count++
+	}
+	iter.Release()
+	if err := iter.Error(); err != nil {
+		return 0, err
+	}
+
+	lw.lastCount = time.Now()
+	lw.mu.Lock()
+	lw.currSize = count
+	lw.mu.Unlock()
+
+	return count, nil
+}
+
+func (lw *localWAL) Start(ctx context.Context) error {
+	// Block until the database has drained enough to accept new writes.
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		count, err := lw.count()
+		if err != nil {
 			return err
 		}
 
 		if count > lw.maxSize {
 			select {
+			case <-ctx.Done():
+				return ctx.Err()
 			case lw.wake <- struct{}{}:
-			default:
+			case <-ticker.C:
 			}
-			time.Sleep(1 * time.Second)
 			continue
 		}
 		return nil
 	}
-
-	return fmt.Errorf("wal: timed out waiting for buffered changes to drain")
 }
 
 func (lw *localWAL) Get(ctx context.Context, key string) ([]byte, error) {

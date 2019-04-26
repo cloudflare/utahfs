@@ -35,18 +35,18 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	store, err = storage.NewCache(store, 512)
+	store, err = storage.NewCache(store, 32*1024)
 	if err != nil {
 		log.Fatal(err)
 	}
 	walPath := path.Join(path.Dir(flag.Arg(0)), "utahfs-wal")
-	appStore, err := utahfs.NewLocalWAL(store, walPath, 512)
+	appStore, err := utahfs.NewLocalWAL(store, walPath, 32*512)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	bs := utahfs.NewBasicBlockStorage(appStore)
-	bfs, err := utahfs.NewBlockFilesystem(bs, 12, 1024*1024)
+	bfs, err := utahfs.NewBlockFilesystem(bs, 12, 32*1024)
 	if err != nil {
 		log.Fatal(err)
 	}
