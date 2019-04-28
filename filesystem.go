@@ -72,7 +72,7 @@ type filesystem struct {
 
 // NewFilesystem returns a FUSE binding that internally stores data in a
 // block-based filesystem.
-func NewFilesystem(store AppStorage, bfs *BlockFilesystem) (fuseutil.FileSystem, error) {
+func NewFilesystem(store *AppStorage, bfs *BlockFilesystem) (fuseutil.FileSystem, error) {
 	ctx := context.Background()
 
 	uid, gid, err := myUserAndGroup()

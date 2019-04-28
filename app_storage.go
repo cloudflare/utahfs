@@ -37,29 +37,6 @@ func (s *State) Clone() *State {
 	}
 }
 
-// AppStorage is an extension of the ObjectStorage interface that provides
-// shared state and atomic transactions.
-type AppStorage interface {
-	// Start begins a new transaction. None of the methods below will work until
-	// this is called, and will stop working again after Commit or Rollback is
-	// called.
-	//
-	// Transactions are isolated and atomic.
-	Start(ctx context.Context) error
-
-	// State returns a map of shared global state. Consumers may modify the
-	// returned struct, and these modifications will be persisted after Commit
-	// is called.
-	State() (*State, error)
-
-	ObjectStorage
-
-	// Commit persists any changes made to the backend.
-	Commit(ctx context.Context) error
-	// Rollback discards all changes made in this transaction.
-	Rollback(ctx context.Context)
-}
-
 type changes struct {
 	Original *State
 
@@ -76,18 +53,18 @@ func newChanges(state *State) *changes {
 	}
 }
 
-// appStorage is an extension of the ReliableStorage interface that provides
+// AppStorage is an extension of the ReliableStorage interface that provides
 // shared state.
-type appStorage struct {
-	store   reliableStorage
+type AppStorage struct {
+	store   ReliableStorage
 	pending *changes
 }
 
-func newAppStorage(store reliableStorage) *appStorage {
-	return &appStorage{store: store}
+func NewAppStorage(store ReliableStorage) *AppStorage {
+	return &AppStorage{store: store}
 }
 
-func (as *appStorage) Start(ctx context.Context) error {
+func (as *AppStorage) Start(ctx context.Context) error {
 	if as.pending != nil {
 		return fmt.Errorf("app: transaction already started")
 	}
@@ -115,14 +92,14 @@ func (as *appStorage) Start(ctx context.Context) error {
 // State returns a struct of shared global state. Consumers may modify the
 // returned struct, and these modifications will be persisted after Commit is
 // called.
-func (as *appStorage) State() (*State, error) {
+func (as *AppStorage) State() (*State, error) {
 	if as.pending == nil {
 		return nil, fmt.Errorf("app: transaction not active")
 	}
 	return as.pending.State, nil
 }
 
-func (as *appStorage) Get(ctx context.Context, key string) ([]byte, error) {
+func (as *AppStorage) Get(ctx context.Context, key string) ([]byte, error) {
 	if as.pending == nil {
 		return nil, fmt.Errorf("app: transaction not active")
 	}
@@ -137,7 +114,7 @@ func (as *appStorage) Get(ctx context.Context, key string) ([]byte, error) {
 	return as.store.Get(ctx, key)
 }
 
-func (as *appStorage) Set(ctx context.Context, key string, data []byte) error {
+func (as *AppStorage) Set(ctx context.Context, key string, data []byte) error {
 	if as.pending == nil {
 		return fmt.Errorf("app: transaction not active")
 	}
@@ -147,7 +124,7 @@ func (as *appStorage) Set(ctx context.Context, key string, data []byte) error {
 	return nil
 }
 
-func (as *appStorage) Delete(ctx context.Context, key string) error {
+func (as *AppStorage) Delete(ctx context.Context, key string) error {
 	if as.pending == nil {
 		return fmt.Errorf("app: transaction not active")
 	}
@@ -157,7 +134,8 @@ func (as *appStorage) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
-func (as *appStorage) Commit(ctx context.Context) error {
+// Commit persists any changes made to the backend.
+func (as *AppStorage) Commit(ctx context.Context) error {
 	if as.pending == nil {
 		return fmt.Errorf("app: transaction not active")
 	}
@@ -177,7 +155,8 @@ func (as *appStorage) Commit(ctx context.Context) error {
 	return nil
 }
 
-func (as *appStorage) Rollback(ctx context.Context) {
+// Rollback discards all changes made in this transaction.
+func (as *AppStorage) Rollback(ctx context.Context) {
 	as.store.Commit(ctx, nil)
 	as.pending = nil
 }

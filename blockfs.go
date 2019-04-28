@@ -20,13 +20,13 @@ type BlockStorage interface {
 }
 
 type basicBlockStorage struct {
-	base AppStorage
+	base *AppStorage
 }
 
-// NewBasicBlockStorage turns an AppStorage implementation into a
-// BlockStorage implementation. It simply converts the pointer into a hex string
-// and uses that as the key.
-func NewBasicBlockStorage(base AppStorage) BlockStorage {
+// NewBasicBlockStorage turns an AppStorage implementation into a BlockStorage
+// implementation. It simply converts the pointer into a hex string and uses
+// that as the key.
+func NewBasicBlockStorage(base *AppStorage) BlockStorage {
 	return basicBlockStorage{base}
 }
 

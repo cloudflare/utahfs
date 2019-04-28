@@ -12,9 +12,19 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
-type reliableStorage interface {
+// ReliableStorage is an extension of the ObjectStorage interface that provides
+// distributed locking (if necessary) and atomic transactions.
+type ReliableStorage interface {
+	// Start begins a new transaction. The methods below will not work until
+	// this is called, and will stop working again after Commit is called.
+	//
+	// Transactions are isolated and atomic.
 	Start(ctx context.Context) error
+
 	Get(ctx context.Context, key string) (data []byte, err error)
+
+	// Commit persists the changes in `writes` to the backend, atomically. If
+	// the value of a key is nil, then that key is deleted.
 	Commit(ctx context.Context, writes map[string][]byte) error
 }
 
@@ -22,10 +32,10 @@ type simpleStorage struct {
 	store ObjectStorage
 }
 
-// NewSimpleStorage returns an AppStorage implementation, intended for testing.
-// It simply panics if the atomicity of a transaction is broken.
-func NewSimpleStorage(store ObjectStorage) AppStorage {
-	return newAppStorage(&simpleStorage{store})
+// NewSimpleStorage returns a ReliableStorage implementation, intended for
+// testing. It simply panics if the atomicity of a transaction is broken.
+func NewSimpleStorage(store ObjectStorage) ReliableStorage {
+	return &simpleStorage{store}
 }
 
 func (ss *simpleStorage) Start(ctx context.Context) error { return nil }
@@ -55,13 +65,13 @@ type localWAL struct {
 	wake      chan struct{}
 }
 
-// NewLocalWAL returns an AppStorage implementation that achieves reliable
+// NewLocalWAL returns a ReliableStorage implementation that achieves reliable
 // writes over a remote object storage provider by buffering writes in a
 // Write-Ahead Log (WAL) stored at `path`.
 //
 // The WAL may have at least `maxSize` buffered entries before new writes start
 // blocking on old writes being flushed.
-func NewLocalWAL(remote ObjectStorage, path string, maxSize int) (AppStorage, error) {
+func NewLocalWAL(remote ObjectStorage, path string, maxSize int) (ReliableStorage, error) {
 	local, err := leveldb.OpenFile(path, nil)
 	if err != nil {
 		return nil, err
@@ -77,7 +87,7 @@ func NewLocalWAL(remote ObjectStorage, path string, maxSize int) (AppStorage, er
 	}
 	go wal.drain()
 
-	return newAppStorage(wal), nil
+	return wal, nil
 }
 
 func (lw *localWAL) drain() {

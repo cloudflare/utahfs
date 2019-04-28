@@ -174,14 +174,14 @@ func (nd *node) Persist() error {
 // The prefix of each block file is a gob-encoded structure containing metadata,
 // links to children, and the rest is the node's raw data.
 type nodeManager struct {
-	store AppStorage
+	store *AppStorage
 	bfs   *BlockFilesystem
 	cache *lru.Cache
 
 	uid, gid uint32
 }
 
-func newNodeManager(store AppStorage, bfs *BlockFilesystem, cacheSize int, uid, gid uint32) (*nodeManager, error) {
+func newNodeManager(store *AppStorage, bfs *BlockFilesystem, cacheSize int, uid, gid uint32) (*nodeManager, error) {
 	cache, err := lru.New(cacheSize)
 	if err != nil {
 		return nil, err
