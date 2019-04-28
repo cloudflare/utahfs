@@ -38,9 +38,9 @@ type b2 struct {
 	url    string
 }
 
-// NewB2 returns a new object storage backend, where `acctId` and `appKey` are
-// the Account ID and Application Key of a B2 bucket. `bucket` is the name of
-// the bucket. `url` is the URL to use to download data.
+// NewB2 returns object storage backed by Backblaze B2. `acctId` and `appKey`
+// are the Account ID and Application Key of a B2 bucket. `bucket` is the name
+// of the bucket. `url` is the URL to use to download data.
 func NewB2(acctId, appKey, bucket, url string) (utahfs.ObjectStorage, error) {
 	conn, err := backblaze.NewB2(backblaze.Credentials{
 		AccountID:      acctId,

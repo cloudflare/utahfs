@@ -19,7 +19,9 @@ type s3Client struct {
 	client *s3.S3
 }
 
-// NewS3 returns a new object storage backend, where
+// NewS3 returns object storage backed by AWS S3 or a compatible service like
+// Wasabi. `appId` and `appKey` are the static credentials. `bucket` is the name
+// of the bucket. `url` and `region` are the location of the S3 cluster.
 func NewS3(appId, appKey, bucket, url, region string) (utahfs.ObjectStorage, error) {
 	client := s3.New(session.New(&aws.Config{
 		Credentials:      credentials.NewStaticCredentials(appId, appKey, ""),
