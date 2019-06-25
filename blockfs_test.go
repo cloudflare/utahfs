@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"bytes"
+	"context"
 	crand "crypto/rand"
 	"io"
 	"math/rand"
@@ -31,7 +32,7 @@ func (ms memStorage) State() (*State, error) {
 	return ms.state, nil
 }
 
-func (ms memStorage) Get(key uint32) ([]byte, error) {
+func (ms memStorage) Get(ctx context.Context, key uint32) ([]byte, error) {
 	d, ok := ms.data[key]
 	if !ok {
 		return nil, ErrObjectNotFound
@@ -41,7 +42,7 @@ func (ms memStorage) Get(key uint32) ([]byte, error) {
 	return data, nil
 }
 
-func (ms memStorage) Set(key uint32, data []byte) error {
+func (ms memStorage) Set(ctx context.Context, key uint32, data []byte) error {
 	d := make([]byte, len(data))
 	copy(d, data)
 	ms.data[key] = d
@@ -143,6 +144,8 @@ func testBFS(t *testing.T, td *testData) {
 }
 
 func TestBlockFilesystem(t *testing.T) {
+	ctx := context.Background()
+
 	bfs, err := NewBlockFilesystem(newMemStorage(), 3, 256)
 	if err != nil {
 		t.Fatal(err)
@@ -155,7 +158,7 @@ func TestBlockFilesystem(t *testing.T) {
 		dice := rand.Intn(10000)
 
 		if len(ptrs) == 0 || dice == 0 {
-			ptr, bf, err := bfs.Create()
+			ptr, bf, err := bfs.Create(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}

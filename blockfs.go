@@ -19,27 +19,27 @@ type BlockStorage interface {
 	Set(ctx context.Context, ptr uint32, data []byte) (err error)
 }
 
-type basicBlockStorage struct {
+type simpleBlockStorage struct {
 	base *AppStorage
 }
 
-// NewBasicBlockStorage turns an AppStorage implementation into a BlockStorage
+// NewSimpleBlockStorage turns an AppStorage implementation into a BlockStorage
 // implementation. It simply converts the pointer into a hex string and uses
 // that as the key.
 func NewBasicBlockStorage(base *AppStorage) BlockStorage {
-	return basicBlockStorage{base}
+	return simpleBlockStorage{base}
 }
 
-func (bbs basicBlockStorage) State() (*State, error) {
-	return bbs.base.State()
+func (sbs simpleBlockStorage) State() (*State, error) {
+	return sbs.base.State()
 }
 
-func (bbs basicBlockStorage) Get(ctx context.Context, ptr uint32) ([]byte, error) {
-	return bbs.base.Get(ctx, fmt.Sprintf("%x", ptr))
+func (sbs simpleBlockStorage) Get(ctx context.Context, ptr uint32) ([]byte, error) {
+	return sbs.base.Get(ctx, fmt.Sprintf("%x", ptr))
 }
 
-func (bbs basicBlockStorage) Set(ctx context.Context, ptr uint32, data []byte) error {
-	return bbs.base.Set(ctx, fmt.Sprintf("%x", ptr), data)
+func (sbs simpleBlockStorage) Set(ctx context.Context, ptr uint32, data []byte) error {
+	return sbs.base.Set(ctx, fmt.Sprintf("%x", ptr), data)
 }
 
 // BlockFilesystem implements large files as skiplists over fixed-size blocks
