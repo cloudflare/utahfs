@@ -53,6 +53,91 @@ func (ss *simpleStorage) Commit(ctx context.Context, writes map[string][]byte) e
 	return nil
 }
 
+type reliableStub struct {
+	base ReliableStorage
+	data map[string][]byte
+}
+
+var _ ObjectStorage = reliableStub{}
+
+func (rs reliableStub) Get(ctx context.Context, key string) ([]byte, error) {
+	raw, ok := rs.data[key]
+	if !ok {
+		return rs.base.Get(ctx, key)
+	} else if raw == nil {
+		return nil, ErrObjectNotFound
+	}
+	return dup(raw), nil
+}
+
+func (rs reliableStub) Set(ctx context.Context, key string, data []byte) error {
+	rs.data[key] = dup(data)
+	return nil
+}
+
+func (rs reliableStub) Delete(ctx context.Context, key string) error {
+	rs.data[key] = nil
+	return nil
+}
+
+// ReliableObjectStorage provides a way for an ObjectStorage implementation to
+// be composed in front of a ReliableStorage implementation.
+//
+// Take the Store field of the exposed struct, set it as the base storage of any
+// other ObjectStorage implementations, and then replace it with the result. For
+// example:
+//   ros := utahfs.NewReliableObjectStorage(base)
+//   ros.Store, _ = storage.NewCache(ros.Store, 4096)
+// and now any reads will possibly be answered from cached before hitting
+// `base`, and any redundant writes will be omitted.
+type ReliableObjectStorage struct {
+	Store ObjectStorage
+	stub  reliableStub
+}
+
+var _ ReliableStorage = &ReliableObjectStorage{}
+
+func NewReliableObjectStorage(base ReliableStorage) *ReliableObjectStorage {
+	stub := reliableStub{
+		base: base,
+		data: make(map[string][]byte),
+	}
+	return &ReliableObjectStorage{
+		Store: stub,
+		stub:  stub,
+	}
+}
+
+func (ros *ReliableObjectStorage) Start(ctx context.Context) error {
+	return ros.stub.base.Start(ctx)
+}
+
+func (ros *ReliableObjectStorage) Get(ctx context.Context, key string) ([]byte, error) {
+	return ros.Store.Get(ctx, key)
+}
+
+func (ros *ReliableObjectStorage) Commit(ctx context.Context, writes map[string][]byte) error {
+	for key, val := range writes {
+		if val == nil {
+			if err := ros.Store.Delete(ctx, key); err != nil {
+				return err
+			}
+		} else {
+			if err := ros.Store.Set(ctx, key, val); err != nil {
+				return err
+			}
+		}
+	}
+
+	finalWrites := make(map[string][]byte)
+	for key, val := range ros.stub.data {
+		finalWrites[key] = val
+		delete(ros.stub.data, key)
+	}
+
+	return ros.stub.base.Commit(ctx, finalWrites)
+}
+
 type localWAL struct {
 	mu sync.Mutex
 
@@ -147,12 +232,13 @@ func (lw *localWAL) drop(key, val []byte) error {
 }
 
 func (lw *localWAL) count() (int, error) {
+	lw.mu.Lock()
 	if time.Since(lw.lastCount) < 10*time.Second {
-		lw.mu.Lock()
 		curr := lw.currSize
 		lw.mu.Unlock()
 		return curr, nil
 	}
+	lw.mu.Unlock()
 
 	count := 0
 	iter := lw.local.NewIterator(&util.Range{nil, nil}, nil)
@@ -164,8 +250,8 @@ func (lw *localWAL) count() (int, error) {
 		return 0, err
 	}
 
-	lw.lastCount = time.Now()
 	lw.mu.Lock()
+	lw.lastCount = time.Now()
 	lw.currSize = count
 	lw.mu.Unlock()
 
