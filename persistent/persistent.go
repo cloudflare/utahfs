@@ -1,6 +1,6 @@
-// Package storage implements several compatible object-storage backends, and
+// Package persistent implements several compatible object-storage backends, and
 // additional functionality that can be layered upon them.
-package storage
+package persistent
 
 import (
 	"context"
