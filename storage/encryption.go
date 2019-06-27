@@ -8,13 +8,11 @@ import (
 	"crypto/sha1"
 	"fmt"
 
-	"github.com/Bren2010/utahfs"
-
 	"golang.org/x/crypto/pbkdf2"
 )
 
 type encryption struct {
-	base utahfs.ObjectStorage
+	base ObjectStorage
 	aead cipher.AEAD
 }
 
@@ -22,7 +20,7 @@ type encryption struct {
 // values are encrypted with AES-GCM before being processed further.
 //
 // The encryption key is derived with PBKDF2 from `password`.
-func WithEncryption(base utahfs.ObjectStorage, password string) (utahfs.ObjectStorage, error) {
+func WithEncryption(base ObjectStorage, password string) (ObjectStorage, error) {
 	key := pbkdf2.Key([]byte(password), []byte("7fedd6d671beec56"), 4096, 32, sha1.New)
 
 	block, err := aes.NewCipher(key)

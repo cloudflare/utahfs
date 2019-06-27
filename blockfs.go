@@ -10,38 +10,6 @@ const nilPtr = ^uint32(0)
 
 var errEndOfBlock = fmt.Errorf("blockfs: reached end of block")
 
-// BlockStorage is a derivative of AppStorage that uses uint32 pointers as keys
-// instead of strings. It is meant to help make implementing ORAM easier.
-type BlockStorage interface {
-	State() (*State, error)
-
-	Get(ctx context.Context, ptr uint32) (data []byte, err error)
-	Set(ctx context.Context, ptr uint32, data []byte) (err error)
-}
-
-type simpleBlockStorage struct {
-	base *AppStorage
-}
-
-// NewSimpleBlockStorage turns an AppStorage implementation into a BlockStorage
-// implementation. It simply converts the pointer into a hex string and uses
-// that as the key.
-func NewBasicBlockStorage(base *AppStorage) BlockStorage {
-	return simpleBlockStorage{base}
-}
-
-func (sbs simpleBlockStorage) State() (*State, error) {
-	return sbs.base.State()
-}
-
-func (sbs simpleBlockStorage) Get(ctx context.Context, ptr uint32) ([]byte, error) {
-	return sbs.base.Get(ctx, fmt.Sprintf("%x", ptr))
-}
-
-func (sbs simpleBlockStorage) Set(ctx context.Context, ptr uint32, data []byte) error {
-	return sbs.base.Set(ctx, fmt.Sprintf("%x", ptr), data)
-}
-
 // BlockFilesystem implements large files as skiplists over fixed-size blocks
 // stored in an object storage service.
 type BlockFilesystem struct {

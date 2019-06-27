@@ -5,8 +5,6 @@ import (
 	"context"
 	"io/ioutil"
 
-	"github.com/Bren2010/utahfs"
-
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -22,7 +20,7 @@ type s3Client struct {
 // NewS3 returns object storage backed by AWS S3 or a compatible service like
 // Wasabi. `appId` and `appKey` are the static credentials. `bucket` is the name
 // of the bucket. `url` and `region` are the location of the S3 cluster.
-func NewS3(appId, appKey, bucket, url, region string) (utahfs.ObjectStorage, error) {
+func NewS3(appId, appKey, bucket, url, region string) (ObjectStorage, error) {
 	client := s3.New(session.New(&aws.Config{
 		Credentials:      credentials.NewStaticCredentials(appId, appKey, ""),
 		Endpoint:         aws.String(url),
@@ -39,7 +37,7 @@ func (s *s3Client) Get(ctx context.Context, key string) ([]byte, error) {
 		Key:    aws.String(key),
 	})
 	if aerr, ok := err.(awserr.Error); ok && aerr.Code() == s3.ErrCodeNoSuchKey {
-		return nil, utahfs.ErrObjectNotFound
+		return nil, ErrObjectNotFound
 	} else if err != nil {
 		return nil, err
 	}

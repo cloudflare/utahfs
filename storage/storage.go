@@ -1,142 +1,55 @@
-// Package storage implements several compatible object-storage backends.
+// Package storage implements several compatible object-storage backends, and
+// additional functionality that can be layered upon them.
 package storage
 
 import (
-	"bytes"
 	"context"
 	"errors"
-
-	"github.com/Bren2010/utahfs"
-
-	"github.com/hashicorp/golang-lru"
 )
 
-func dup(in []byte) []byte {
-	if in == nil {
-		return nil
-	}
-	out := make([]byte, len(in))
-	copy(out, in)
-	return out
+const nilPtr = ^uint32(0)
+
+var (
+	ErrObjectNotFound = errors.New("object not found")
+)
+
+// ObjectStorage defines the minimal interface that's implemented by a remote
+// object storage provider.
+type ObjectStorage interface {
+	// Get returns the data corresponding to the given key, or ErrObjectNotFound
+	// if no object with that key exists.
+	Get(ctx context.Context, key string) (data []byte, err error)
+	// Set updates the object with the given key or creates the object if it
+	// does not exist.
+	Set(ctx context.Context, key string, data []byte) (err error)
+	// Delete removes the object with the given key.
+	Delete(ctx context.Context, key string) (err error)
 }
 
-type memory map[string][]byte
+// ReliableStorage is an extension of the ObjectStorage interface that provides
+// distributed locking (if necessary) and atomic transactions.
+type ReliableStorage interface {
+	// Start begins a new transaction. The methods below will not work until
+	// this is called, and will stop working again after Commit is called.
+	//
+	// Transactions are isolated and atomic.
+	Start(ctx context.Context) error
 
-// NewMemory returns an object storage backend that simply stores data
-// in-memory.
-func NewMemory() utahfs.ObjectStorage { return make(memory) }
+	Get(ctx context.Context, key string) (data []byte, err error)
 
-func (m memory) Get(ctx context.Context, key string) ([]byte, error) {
-	data, ok := m[key]
-	if !ok {
-		return nil, utahfs.ErrObjectNotFound
-	}
-	return dup(data), nil
+	// Commit persists the changes in `writes` to the backend, atomically. If
+	// the value of a key is nil, then that key is deleted.
+	Commit(ctx context.Context, writes map[string][]byte) error
 }
 
-func (m memory) Set(ctx context.Context, key string, data []byte) error {
-	m[key] = dup(data)
-	return nil
-}
+// BlockStorage is a derivative of ObjectStorage that uses uint32 pointers as
+// keys instead of strings. It is meant to help make implementing ORAM easier.
+type BlockStorage interface {
+	Start(ctx context.Context) error
 
-func (m memory) Delete(ctx context.Context, key string) error {
-	delete(m, key)
-	return nil
-}
+	Get(ctx context.Context, ptr uint32) (data []byte, err error)
+	Set(ctx context.Context, ptr uint32, data []byte) (err error)
 
-type retry struct {
-	base     utahfs.ObjectStorage
-	attempts int
-}
-
-// NewRetry wraps a base object storage backend, and will retry if requests
-// fail.
-func NewRetry(base utahfs.ObjectStorage, attempts int) (utahfs.ObjectStorage, error) {
-	if attempts <= 0 {
-		return nil, errors.New("storage: attempts must be greater than zero")
-	}
-	return &retry{base, attempts}, nil
-}
-
-func (r *retry) Get(ctx context.Context, key string) (data []byte, err error) {
-	for i := 0; i < r.attempts; i++ {
-		data, err = r.base.Get(ctx, key)
-		if err == nil || err == utahfs.ErrObjectNotFound {
-			return
-		}
-	}
-
-	return
-}
-
-func (r *retry) Set(ctx context.Context, key string, data []byte) (err error) {
-	for i := 0; i < r.attempts; i++ {
-		err = r.base.Set(ctx, key, data)
-		if err == nil {
-			return
-		}
-	}
-
-	return
-}
-
-func (r *retry) Delete(ctx context.Context, key string) (err error) {
-	for i := 0; i < r.attempts; i++ {
-		err = r.base.Delete(ctx, key)
-		if err == nil {
-			return
-		}
-	}
-
-	return
-}
-
-type cache struct {
-	base  utahfs.ObjectStorage
-	cache *lru.Cache
-}
-
-// NewCache wraps a base object storage backend with an LRU cache of the
-// requested size.
-func NewCache(base utahfs.ObjectStorage, size int) (utahfs.ObjectStorage, error) {
-	c, err := lru.New(size)
-	if err != nil {
-		return nil, err
-	}
-	return &cache{base, c}, nil
-}
-
-func (c *cache) Get(ctx context.Context, key string) ([]byte, error) {
-	val, ok := c.cache.Get(key)
-	if ok {
-		return dup(val.([]byte)), nil
-	}
-	data, err := c.base.Get(ctx, key)
-	if err != nil {
-		return nil, err
-	}
-	c.cache.Add(key, dup(data))
-	return data, nil
-}
-
-func (c *cache) skip(key string, data []byte) bool {
-	cand, ok := c.cache.Get(key)
-	return ok && bytes.Equal(cand.([]byte), data)
-}
-
-func (c *cache) Set(ctx context.Context, key string, data []byte) error {
-	if c.skip(key, data) {
-		return nil
-	}
-	c.cache.Remove(key)
-	if err := c.base.Set(ctx, key, data); err != nil {
-		return err
-	}
-	c.cache.Add(key, dup(data))
-	return nil
-}
-
-func (c *cache) Delete(ctx context.Context, key string) error {
-	c.cache.Remove(key)
-	return c.base.Delete(ctx, key)
+	Commit(ctx context.Context) error
+	Rollback(ctx context.Context)
 }

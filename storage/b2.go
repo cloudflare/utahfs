@@ -9,8 +9,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Bren2010/utahfs"
-
 	"gopkg.in/kothar/go-backblaze.v0"
 )
 
@@ -41,7 +39,7 @@ type b2 struct {
 // NewB2 returns object storage backed by Backblaze B2. `acctId` and `appKey`
 // are the Account ID and Application Key of a B2 bucket. `bucket` is the name
 // of the bucket. `url` is the URL to use to download data.
-func NewB2(acctId, appKey, bucket, url string) (utahfs.ObjectStorage, error) {
+func NewB2(acctId, appKey, bucket, url string) (ObjectStorage, error) {
 	conn, err := backblaze.NewB2(backblaze.Credentials{
 		AccountID:      acctId,
 		ApplicationKey: appKey,
@@ -65,7 +63,7 @@ func (b *b2) Get(ctx context.Context, key string) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == 404 {
-		return nil, utahfs.ErrObjectNotFound
+		return nil, ErrObjectNotFound
 	} else if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("storage: unexpected response status: %v", resp.Status)
 	}
