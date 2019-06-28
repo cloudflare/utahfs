@@ -9,33 +9,37 @@ import (
 	"io"
 	"math/rand"
 	"time"
+
+	"github.com/Bren2010/utahfs/persistent"
 )
 
 func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
-// memStorage implements the ObjectStorage interface over a map.
+// memStorage implements the BlockStorage interface over a map.
 type memStorage struct {
-	state *State
+	state *persistent.State
 	data  map[uint32][]byte
 }
 
-func newMemStorage() BlockStorage {
+func newMemStorage() persistent.BlockStorage {
 	return memStorage{
-		state: newState(),
+		state: persistent.NewState(),
 		data:  make(map[uint32][]byte),
 	}
 }
 
-func (ms memStorage) State() (*State, error) {
+func (ms memStorage) Start(ctx context.Context) error { return nil }
+
+func (ms memStorage) State() (*persistent.State, error) {
 	return ms.state, nil
 }
 
 func (ms memStorage) Get(ctx context.Context, key uint32) ([]byte, error) {
 	d, ok := ms.data[key]
 	if !ok {
-		return nil, ErrObjectNotFound
+		return nil, persistent.ErrObjectNotFound
 	}
 	data := make([]byte, len(d))
 	copy(data, d)
@@ -48,6 +52,9 @@ func (ms memStorage) Set(ctx context.Context, key uint32, data []byte) error {
 	ms.data[key] = d
 	return nil
 }
+
+func (ms memStorage) Commit(ctx context.Context) error { return nil }
+func (ms memStorage) Rollback(ctx context.Context)     {}
 
 type testData struct {
 	bf   *BlockFile
@@ -146,7 +153,11 @@ func testBFS(t *testing.T, td *testData) {
 func TestBlockFilesystem(t *testing.T) {
 	ctx := context.Background()
 
-	bfs, err := NewBlockFilesystem(newMemStorage(), 3, 256)
+	store := persistent.NewAppStorage(newMemStorage())
+	if err := store.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	bfs, err := NewBlockFilesystem(store, 3, 256)
 	if err != nil {
 		t.Fatal(err)
 	}

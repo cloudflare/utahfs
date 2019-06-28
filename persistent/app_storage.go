@@ -19,7 +19,7 @@ type State struct {
 	NextPtr uint32
 }
 
-func newState() *State {
+func NewState() *State {
 	return &State{
 		RootPtr: nilPtr,
 
@@ -59,7 +59,7 @@ func (as *AppStorage) Start(ctx context.Context) error {
 	}
 	raw, err := as.base.Get(ctx, 0)
 	if err == ErrObjectNotFound {
-		as.original, as.state = newState(), newState()
+		as.original, as.state = NewState(), NewState()
 		return nil
 	} else if err != nil {
 		return err
