@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+
+	"github.com/Bren2010/utahfs/persistent"
 )
 
 const nilPtr = ^uint32(0)
@@ -13,7 +15,7 @@ var errEndOfBlock = fmt.Errorf("blockfs: reached end of block")
 // BlockFilesystem implements large files as skiplists over fixed-size blocks
 // stored in an object storage service.
 type BlockFilesystem struct {
-	store BlockStorage
+	store *persistent.AppStorage
 
 	numPtrs  int64
 	dataSize int64
@@ -31,7 +33,7 @@ type BlockFilesystem struct {
 //      blocks which have been discarded and are free for re-allocation.
 //   2. next - The next unallocated pointer. A block with this pointer is
 //      created only if the trash list is empty.
-func NewBlockFilesystem(store BlockStorage, numPtrs, dataSize int64) (*BlockFilesystem, error) {
+func NewBlockFilesystem(store *persistent.AppStorage, numPtrs, dataSize int64) (*BlockFilesystem, error) {
 	if numPtrs < 1 {
 		return nil, fmt.Errorf("blockfs: number of pointers must be greater than zero")
 	} else if dataSize < 1 || dataSize >= (1<<24) {

@@ -7,6 +7,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/Bren2010/utahfs/persistent"
+
 	"github.com/hashicorp/golang-lru"
 	"github.com/jacobsa/fuse/fuseops"
 	"github.com/jacobsa/fuse/fuseutil"
@@ -174,20 +176,18 @@ func (nd *node) Persist() error {
 // The prefix of each block file is a gob-encoded structure containing metadata,
 // links to children, and the rest is the node's raw data.
 type nodeManager struct {
-	store *AppStorage
 	bfs   *BlockFilesystem
 	cache *lru.Cache
 
 	uid, gid uint32
 }
 
-func newNodeManager(store *AppStorage, bfs *BlockFilesystem, cacheSize int, uid, gid uint32) (*nodeManager, error) {
+func newNodeManager(bfs *BlockFilesystem, cacheSize int, uid, gid uint32) (*nodeManager, error) {
 	cache, err := lru.New(cacheSize)
 	if err != nil {
 		return nil, err
 	}
 	return &nodeManager{
-		store: store,
 		bfs:   bfs,
 		cache: cache,
 
@@ -196,11 +196,11 @@ func newNodeManager(store *AppStorage, bfs *BlockFilesystem, cacheSize int, uid,
 	}, nil
 }
 
-func (nm *nodeManager) Start(ctx context.Context) error  { return nm.store.Start(ctx) }
-func (nm *nodeManager) Commit(ctx context.Context) error { return nm.store.Commit(ctx) }
-func (nm *nodeManager) Rollback(ctx context.Context)     { nm.store.Rollback(ctx) }
+func (nm *nodeManager) Start(ctx context.Context) error  { return nm.bfs.store.Start(ctx) }
+func (nm *nodeManager) Commit(ctx context.Context) error { return nm.bfs.store.Commit(ctx) }
+func (nm *nodeManager) Rollback(ctx context.Context)     { nm.bfs.store.Rollback(ctx) }
 
-func (nm *nodeManager) State() (*State, error) { return nm.store.State() }
+func (nm *nodeManager) State() (*persistent.State, error) { return nm.bfs.store.State() }
 
 func (nm *nodeManager) Create(ctx context.Context, mode os.FileMode) (uint32, error) {
 	now := time.Now()

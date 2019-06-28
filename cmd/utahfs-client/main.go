@@ -9,7 +9,7 @@ import (
 	"path"
 
 	"github.com/Bren2010/utahfs"
-	"github.com/Bren2010/utahfs/storage"
+	"github.com/Bren2010/utahfs/persistent"
 
 	"github.com/jacobsa/fuse"
 	"github.com/jacobsa/fuse/fuseutil"
@@ -24,39 +24,34 @@ func main() {
 		log.Fatalf("failed to parse mount path")
 	}
 
-	store, err := storage.NewS3(
+	store, err := persistent.NewS3(
 		os.Getenv("S3_APP_ID"), os.Getenv("S3_APP_KEY"),
 		os.Getenv("S3_BUCKET"), os.Getenv("S3_URL"), os.Getenv("S3_REGION"),
 	)
 	if err != nil {
 		log.Fatal(err)
 	}
-	store, err = storage.NewRetry(store, 3)
+	store, err = persistent.NewRetry(store, 3)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	walPath := path.Join(path.Dir(flag.Arg(0)), "utahfs-wal")
-	relStore, err := utahfs.NewLocalWAL(store, walPath, 32*512)
+	relStore, err := persistent.NewLocalWAL(store, walPath, 32*512)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	ros := utahfs.NewReliableObjectStorage(relStore)
-	ros.Store, err = storage.NewCache(store, 32*1024)
+	buffered := persistent.NewBufferedStorage(relStore)
+	block := persistent.NewSimpleBlockStorage(buffered)
+	appStore := persistent.NewAppStorage(block)
+
+	bfs, err := utahfs.NewBlockFilesystem(appStore, 12, 32*1024)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	appStore := utahfs.NewAppStorage(ros)
-
-	bs := utahfs.NewBasicBlockStorage(appStore)
-	bfs, err := utahfs.NewBlockFilesystem(bs, 12, 32*1024)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	fs, err := utahfs.NewFilesystem(appStore, bfs)
+	fs, err := utahfs.NewFilesystem(bfs)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -66,7 +61,7 @@ func main() {
 		FSName: volume,
 
 		ErrorLogger: log.New(os.Stderr, "fuse: ", log.Flags()),
-		DebugLogger: log.New(os.Stderr, "fuse-debug: ", log.Flags()),
+		// DebugLogger: log.New(os.Stderr, "fuse-debug: ", log.Flags()),
 
 		VolumeName: volume,
 	}
