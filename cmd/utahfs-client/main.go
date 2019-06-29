@@ -41,6 +41,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	relStore, err = persistent.NewCache(relStore, 32*1024)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	buffered := persistent.NewBufferedStorage(relStore)
 	block := persistent.NewSimpleBlockStorage(buffered)
@@ -61,7 +65,7 @@ func main() {
 		FSName: volume,
 
 		ErrorLogger: log.New(os.Stderr, "fuse: ", log.Flags()),
-		// DebugLogger: log.New(os.Stderr, "fuse-debug: ", log.Flags()),
+		DebugLogger: log.New(os.Stderr, "fuse-debug: ", log.Flags()),
 
 		VolumeName: volume,
 	}

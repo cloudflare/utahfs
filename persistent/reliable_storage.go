@@ -1,7 +1,10 @@
 package persistent
 
 import (
+	"bytes"
 	"context"
+
+	"github.com/hashicorp/golang-lru"
 )
 
 type simpleReliableStorage struct {
@@ -29,91 +32,60 @@ func (srs *simpleReliableStorage) Commit(ctx context.Context, writes map[string]
 	return nil
 }
 
-type reliableStub struct {
-	base ReliableStorage
-	data map[string][]byte
+type cache struct {
+	base  ReliableStorage
+	cache *lru.Cache
 }
 
-var _ ObjectStorage = reliableStub{}
-
-func (rs reliableStub) Get(ctx context.Context, key string) ([]byte, error) {
-	raw, ok := rs.data[key]
-	if !ok {
-		return rs.base.Get(ctx, key)
-	} else if raw == nil {
-		return nil, ErrObjectNotFound
+// NewCache wraps a base object storage backend with an LRU cache of the
+// requested size.
+func NewCache(base ReliableStorage, size int) (ReliableStorage, error) {
+	c, err := lru.New(size)
+	if err != nil {
+		return nil, err
 	}
-	return dup(raw), nil
+	return &cache{base, c}, nil
 }
 
-func (rs reliableStub) Set(ctx context.Context, key string, data []byte) error {
-	rs.data[key] = dup(data)
+func (c *cache) Start(ctx context.Context) error { return c.base.Start(ctx) }
+
+func (c *cache) Get(ctx context.Context, key string) ([]byte, error) {
+	val, ok := c.cache.Get(key)
+	if ok {
+		return dup(val.([]byte)), nil
+	}
+	data, err := c.base.Get(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	c.cache.Add(key, dup(data))
+	return data, nil
+}
+
+func (c *cache) skip(key string, data []byte) bool {
+	cand, ok := c.cache.Get(key)
+	return ok && bytes.Equal(cand.([]byte), data)
+}
+
+func (c *cache) Commit(ctx context.Context, writes map[string][]byte) error {
+	dedupedWrites := make(map[string][]byte)
+	for key, data := range writes {
+		if c.skip(key, data) {
+			continue
+		}
+		dedupedWrites[key] = data
+	}
+
+	if err := c.base.Commit(ctx, dedupedWrites); err != nil {
+		return err
+	}
+
+	for key, data := range dedupedWrites {
+		if data == nil {
+			c.cache.Remove(key)
+		} else {
+			c.cache.Add(key, dup(data))
+		}
+	}
 	return nil
 }
-
-func (rs reliableStub) Delete(ctx context.Context, key string) error {
-	rs.data[key] = nil
-	return nil
-}
-
-// NOTE: This code is commented out because I'm not sure that it's valuable, but
-// I spent a lot of time on it and don't want to delete it.
-//
-// // ReliableWrapper provides a way for ObjectStorage implementations that add
-// // additional functionality to be composed in front of a ReliableStorage
-// // implementation.
-// //
-// // Take the Store field of the exposed struct, set it as the base storage of any
-// // other ObjectStorage implementations, and then replace it with the result. For
-// // example:
-// //   ros := storage.NewReliableWrapper(base)
-// //   ros.Store, _ = storage.NewCache(ros.Store, 4096)
-// // and now any reads will possibly be answered from cached before hitting
-// // `base`, and any redundant writes will be omitted.
-// type ReliableWrapper struct {
-// 	Store ObjectStorage
-// 	stub  reliableStub
-// }
-//
-// var _ ReliableStorage = &ReliableWrapper{}
-//
-// func NewReliableWrapper(base ReliableStorage) *ReliableWrapper {
-// 	stub := reliableStub{
-// 		base: base,
-// 		data: make(map[string][]byte),
-// 	}
-// 	return &ReliableWrapper{
-// 		Store: stub,
-// 		stub:  stub,
-// 	}
-// }
-//
-// func (rw *ReliableWrapper) Start(ctx context.Context) error {
-// 	return rw.stub.base.Start(ctx)
-// }
-//
-// func (rw *ReliableWrapper) Get(ctx context.Context, key string) ([]byte, error) {
-// 	return rw.Store.Get(ctx, key)
-// }
-//
-// func (rw *ReliableWrapper) Commit(ctx context.Context, writes map[string][]byte) error {
-// 	for key, val := range writes {
-// 		if val == nil {
-// 			if err := rw.Store.Delete(ctx, key); err != nil {
-// 				return err
-// 			}
-// 		} else {
-// 			if err := rw.Store.Set(ctx, key, val); err != nil {
-// 				return err
-// 			}
-// 		}
-// 	}
-//
-// 	finalWrites := make(map[string][]byte)
-// 	for key, val := range rw.stub.data {
-// 		finalWrites[key] = val
-// 		delete(rw.stub.data, key)
-// 	}
-//
-// 	return rw.stub.base.Commit(ctx, finalWrites)
-// }

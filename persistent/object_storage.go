@@ -1,11 +1,8 @@
 package persistent
 
 import (
-	"bytes"
 	"context"
 	"errors"
-
-	"github.com/hashicorp/golang-lru"
 )
 
 func dup(in []byte) []byte {
@@ -86,54 +83,4 @@ func (r *retry) Delete(ctx context.Context, key string) (err error) {
 	}
 
 	return
-}
-
-type cache struct {
-	base  ObjectStorage
-	cache *lru.Cache
-}
-
-// NewCache wraps a base object storage backend with an LRU cache of the
-// requested size.
-func NewCache(base ObjectStorage, size int) (ObjectStorage, error) {
-	c, err := lru.New(size)
-	if err != nil {
-		return nil, err
-	}
-	return &cache{base, c}, nil
-}
-
-func (c *cache) Get(ctx context.Context, key string) ([]byte, error) {
-	val, ok := c.cache.Get(key)
-	if ok {
-		return dup(val.([]byte)), nil
-	}
-	data, err := c.base.Get(ctx, key)
-	if err != nil {
-		return nil, err
-	}
-	c.cache.Add(key, dup(data))
-	return data, nil
-}
-
-func (c *cache) skip(key string, data []byte) bool {
-	cand, ok := c.cache.Get(key)
-	return ok && bytes.Equal(cand.([]byte), data)
-}
-
-func (c *cache) Set(ctx context.Context, key string, data []byte) error {
-	if c.skip(key, data) {
-		return nil
-	}
-	c.cache.Remove(key)
-	if err := c.base.Set(ctx, key, data); err != nil {
-		return err
-	}
-	c.cache.Add(key, dup(data))
-	return nil
-}
-
-func (c *cache) Delete(ctx context.Context, key string) error {
-	c.cache.Remove(key)
-	return c.base.Delete(ctx, key)
 }
