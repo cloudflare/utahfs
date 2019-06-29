@@ -23,7 +23,7 @@ type node struct {
 
 	Attrs    fuseops.InodeAttributes
 	Children map[string]fuseops.InodeID
-	Data     uint32
+	Data     uint64
 }
 
 func (nd *node) open(create bool) error {
@@ -202,7 +202,7 @@ func (nm *nodeManager) Rollback(ctx context.Context)     { nm.bfs.store.Rollback
 
 func (nm *nodeManager) State() (*persistent.State, error) { return nm.bfs.store.State() }
 
-func (nm *nodeManager) Create(ctx context.Context, mode os.FileMode) (uint32, error) {
+func (nm *nodeManager) Create(ctx context.Context, mode os.FileMode) (uint64, error) {
 	now := time.Now()
 	nd := node{
 		Attrs: fuseops.InodeAttributes{
@@ -233,7 +233,7 @@ func (nm *nodeManager) Create(ctx context.Context, mode os.FileMode) (uint32, er
 	return ptr, nil
 }
 
-func (nm *nodeManager) Open(ctx context.Context, ptr uint32) (*node, error) {
+func (nm *nodeManager) Open(ctx context.Context, ptr uint64) (*node, error) {
 	if val, ok := nm.cache.Get(ptr); ok {
 		nd := val.(*node)
 		nd.ctx, nd.self.ctx = ctx, ctx
@@ -261,11 +261,11 @@ func (nm *nodeManager) Open(ctx context.Context, ptr uint32) (*node, error) {
 	return nd, nil
 }
 
-func (nm *nodeManager) Unlink(ctx context.Context, ptr uint32) error {
+func (nm *nodeManager) Unlink(ctx context.Context, ptr uint64) error {
 	nd, err := nm.Open(ctx, ptr)
 	if err != nil {
 		return err
-	} else if err := nm.bfs.Unlink(ctx, uint32(ptr)); err != nil {
+	} else if err := nm.bfs.Unlink(ctx, ptr); err != nil {
 		return err
 	} else if nd.Data != nilPtr {
 		return nm.bfs.Unlink(ctx, nd.Data)

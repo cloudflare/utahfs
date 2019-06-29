@@ -7,7 +7,7 @@ import (
 	"errors"
 )
 
-const nilPtr = ^uint32(0)
+const nilPtr = ^uint64(0)
 
 var (
 	ErrObjectNotFound = errors.New("object not found")
@@ -42,13 +42,13 @@ type ReliableStorage interface {
 	Commit(ctx context.Context, writes map[string][]byte) error
 }
 
-// BlockStorage is a derivative of ObjectStorage that uses uint32 pointers as
+// BlockStorage is a derivative of ObjectStorage that uses uint64 pointers as
 // keys instead of strings. It is meant to help make implementing ORAM easier.
 type BlockStorage interface {
 	Start(ctx context.Context) error
 
-	Get(ctx context.Context, ptr uint32) (data []byte, err error)
-	Set(ctx context.Context, ptr uint32, data []byte) (err error)
+	Get(ctx context.Context, ptr uint64) (data []byte, err error)
+	Set(ctx context.Context, ptr uint64, data []byte) (err error)
 
 	Commit(ctx context.Context) error
 	Rollback(ctx context.Context)

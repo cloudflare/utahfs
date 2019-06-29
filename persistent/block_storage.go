@@ -20,11 +20,11 @@ func (sbs simpleBlockStorage) Start(ctx context.Context) error {
 	return sbs.base.Start(ctx)
 }
 
-func (sbs simpleBlockStorage) Get(ctx context.Context, ptr uint32) ([]byte, error) {
+func (sbs simpleBlockStorage) Get(ctx context.Context, ptr uint64) ([]byte, error) {
 	return sbs.base.Get(ctx, fmt.Sprintf("%x", ptr))
 }
 
-func (sbs simpleBlockStorage) Set(ctx context.Context, ptr uint32, data []byte) error {
+func (sbs simpleBlockStorage) Set(ctx context.Context, ptr uint64, data []byte) error {
 	return sbs.base.Set(ctx, fmt.Sprintf("%x", ptr), data)
 }
 

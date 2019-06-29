@@ -10,13 +10,13 @@ import (
 // State contains all of the shared global state of a deployment.
 type State struct {
 	// RootPtr points to the root inode of the filesystem.
-	RootPtr uint32
+	RootPtr uint64
 
 	// Blocks that were previously allocated but are now un-used are kept in a
 	// linked list. TrashPtr points to the head of this list.
-	TrashPtr uint32
+	TrashPtr uint64
 	// NextPtr will be the pointer of the next block which is allocated.
-	NextPtr uint32
+	NextPtr uint64
 }
 
 func NewState() *State {
@@ -83,11 +83,11 @@ func (as *AppStorage) State() (*State, error) {
 	return as.state, nil
 }
 
-func (as *AppStorage) Get(ctx context.Context, ptr uint32) ([]byte, error) {
+func (as *AppStorage) Get(ctx context.Context, ptr uint64) ([]byte, error) {
 	return as.base.Get(ctx, ptr+1)
 }
 
-func (as *AppStorage) Set(ctx context.Context, ptr uint32, data []byte) error {
+func (as *AppStorage) Set(ctx context.Context, ptr uint64, data []byte) error {
 	return as.base.Set(ctx, ptr+1, data)
 }
 

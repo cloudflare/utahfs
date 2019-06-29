@@ -8,7 +8,7 @@ import (
 	"github.com/Bren2010/utahfs/persistent"
 )
 
-const nilPtr = ^uint32(0)
+const nilPtr = ^uint64(0)
 
 var errEndOfBlock = fmt.Errorf("blockfs: reached end of block")
 
@@ -51,7 +51,7 @@ func NewBlockFilesystem(store *persistent.AppStorage, numPtrs, dataSize int64) (
 func (bfs *BlockFilesystem) blockSize() int64 { return 4*bfs.numPtrs + 3 + bfs.dataSize }
 
 // allocate returns the pointer of a block which is free for use by the caller.
-func (bfs *BlockFilesystem) allocate(ctx context.Context) (uint32, error) {
+func (bfs *BlockFilesystem) allocate(ctx context.Context) (uint64, error) {
 	state, err := bfs.store.State()
 	if err != nil {
 		return nilPtr, err
@@ -77,13 +77,13 @@ func (bfs *BlockFilesystem) allocate(ctx context.Context) (uint32, error) {
 
 // Create creates a new file. It returns the pointer to the file and an open
 // copy.
-func (bfs *BlockFilesystem) Create(ctx context.Context) (uint32, *BlockFile, error) {
+func (bfs *BlockFilesystem) Create(ctx context.Context) (uint64, *BlockFile, error) {
 	ptr, err := bfs.allocate(ctx)
 	if err != nil {
 		return nilPtr, nil, err
 	}
 
-	ptrs := make([]uint32, bfs.numPtrs)
+	ptrs := make([]uint64, bfs.numPtrs)
 	ptrs[0] = nilPtr
 	for i := 1; i < len(ptrs); i++ {
 		ptrs[i] = ptr
@@ -109,7 +109,7 @@ func (bfs *BlockFilesystem) Create(ctx context.Context) (uint32, *BlockFile, err
 }
 
 // Open returns a handle to an existing file.
-func (bfs *BlockFilesystem) Open(ctx context.Context, ptr uint32) (*BlockFile, error) {
+func (bfs *BlockFilesystem) Open(ctx context.Context, ptr uint64) (*BlockFile, error) {
 	bf := &BlockFile{
 		parent: bfs,
 		ctx:    ctx,
@@ -126,7 +126,7 @@ func (bfs *BlockFilesystem) Open(ctx context.Context, ptr uint32) (*BlockFile, e
 
 // Unlink allows the blocks allocated for a file to be re-used for other
 // purposes.
-func (bfs *BlockFilesystem) Unlink(ctx context.Context, ptr uint32) error {
+func (bfs *BlockFilesystem) Unlink(ctx context.Context, ptr uint64) error {
 	bf, err := bfs.Open(ctx, ptr)
 	if err != nil {
 		return err
@@ -172,7 +172,7 @@ type BlockFile struct {
 	ctx    context.Context
 
 	// start points to the first block of the file.
-	start uint32
+	start uint64
 	// size is the total size of the file, in bytes.
 	size int64
 
@@ -181,7 +181,7 @@ type BlockFile struct {
 	// idx is the index of this block in the skiplist.
 	idx int64
 	// ptr is the pointer for the current block of the file.
-	ptr uint32
+	ptr uint64
 	// curr is the parsed version of the current block.
 	curr *block
 }
@@ -193,7 +193,7 @@ func (bf *BlockFile) persist() error {
 
 // load pulls the block at `ptr` into memory. `pos` is our new position in the
 // file.
-func (bf *BlockFile) load(ptr uint32, pos int64) error {
+func (bf *BlockFile) load(ptr uint64, pos int64) error {
 	data, err := bf.parent.store.Get(bf.ctx, ptr)
 	if err != nil {
 		return err
@@ -420,7 +420,7 @@ func (bf *BlockFile) Truncate(size int64) error {
 	// Seek to any blocks that might point past the end of the new file
 	// boundary. Update them to no longer point over, and collect their pointers
 	// for the new tail block.
-	tailPtrs := make([]uint32, bf.parent.numPtrs)
+	tailPtrs := make([]uint64, bf.parent.numPtrs)
 	tailPtrs[0] = nilPtr
 
 	endIdx := (bf.size - 1) / bf.parent.dataSize
@@ -468,7 +468,7 @@ func (bf *BlockFile) Truncate(size int64) error {
 type block struct {
 	parent *BlockFilesystem
 
-	ptrs []uint32 // ptrs contains the skiplist pointers from the current block.
+	ptrs []uint64 // ptrs contains the skiplist pointers from the current block.
 	data []byte   // data is the block's application data.
 }
 
@@ -478,9 +478,9 @@ func parseBlock(bfs *BlockFilesystem, raw []byte) (*block, error) {
 	}
 
 	// Read pointers.
-	ptrs := make([]uint32, bfs.numPtrs)
+	ptrs := make([]uint64, bfs.numPtrs)
 	for i := 0; i < len(ptrs); i++ {
-		ptrs[i] = uint32(readInt(raw[:4]))
+		ptrs[i] = uint64(readInt(raw[:4]))
 		raw = raw[4:]
 	}
 
@@ -496,9 +496,9 @@ func parseBlock(bfs *BlockFilesystem, raw []byte) (*block, error) {
 
 // Upgrade modifies this block from a tail into an intermediate and returns the
 // pointers for the next tail.
-func (b *block) Upgrade(currIdx int64, currPtr, nextPtr uint32) []uint32 {
+func (b *block) Upgrade(currIdx int64, currPtr, nextPtr uint64) []uint64 {
 	// Compute the tail pointers for the subsequent block.
-	out := make([]uint32, b.parent.numPtrs)
+	out := make([]uint64, b.parent.numPtrs)
 	out[0] = nilPtr
 	for i := 1; i < len(out); i++ {
 		if currIdx%(1<<uint(i)) == 0 {

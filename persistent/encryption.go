@@ -37,7 +37,7 @@ func WithEncryption(base BlockStorage, password string) (BlockStorage, error) {
 
 func (e *encryption) Start(ctx context.Context) error { return e.base.Start(ctx) }
 
-func (e *encryption) Get(ctx context.Context, ptr uint32) ([]byte, error) {
+func (e *encryption) Get(ctx context.Context, ptr uint64) ([]byte, error) {
 	raw, err := e.base.Get(ctx, ptr)
 	if err != nil {
 		return nil, err
@@ -49,7 +49,7 @@ func (e *encryption) Get(ctx context.Context, ptr uint32) ([]byte, error) {
 	return e.aead.Open(nil, raw[:ns], raw[ns:], []byte(fmt.Sprintf("%x", ptr)))
 }
 
-func (e *encryption) Set(ctx context.Context, ptr uint32, data []byte) error {
+func (e *encryption) Set(ctx context.Context, ptr uint64, data []byte) error {
 	nonce := make([]byte, e.aead.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
 		return err

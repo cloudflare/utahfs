@@ -61,7 +61,7 @@ type filesystem struct {
 	fuseutil.NotImplementedFileSystem
 
 	nm      *nodeManager
-	rootPtr uint32
+	rootPtr uint64
 
 	nextHandleID fuseops.HandleID
 	dirHandles   map[fuseops.HandleID][]fuseutil.Dirent
@@ -566,11 +566,11 @@ func (fs *filesystem) synchronize(ctx context.Context) func() {
 	}
 }
 
-func (fs *filesystem) ptr(id fuseops.InodeID) uint32 {
-	return uint32(id) + fs.rootPtr - 1
+func (fs *filesystem) ptr(id fuseops.InodeID) uint64 {
+	return uint64(id) + fs.rootPtr - 1
 }
 
-func (fs *filesystem) inode(ptr uint32) fuseops.InodeID {
+func (fs *filesystem) inode(ptr uint64) fuseops.InodeID {
 	return fuseops.InodeID(ptr - fs.rootPtr + 1)
 }
 

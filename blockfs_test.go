@@ -20,13 +20,13 @@ func init() {
 // memStorage implements the BlockStorage interface over a map.
 type memStorage struct {
 	state *persistent.State
-	data  map[uint32][]byte
+	data  map[uint64][]byte
 }
 
 func newMemStorage() persistent.BlockStorage {
 	return memStorage{
 		state: persistent.NewState(),
-		data:  make(map[uint32][]byte),
+		data:  make(map[uint64][]byte),
 	}
 }
 
@@ -36,7 +36,7 @@ func (ms memStorage) State() (*persistent.State, error) {
 	return ms.state, nil
 }
 
-func (ms memStorage) Get(ctx context.Context, key uint32) ([]byte, error) {
+func (ms memStorage) Get(ctx context.Context, key uint64) ([]byte, error) {
 	d, ok := ms.data[key]
 	if !ok {
 		return nil, persistent.ErrObjectNotFound
@@ -46,7 +46,7 @@ func (ms memStorage) Get(ctx context.Context, key uint32) ([]byte, error) {
 	return data, nil
 }
 
-func (ms memStorage) Set(ctx context.Context, key uint32, data []byte) error {
+func (ms memStorage) Set(ctx context.Context, key uint64, data []byte) error {
 	d := make([]byte, len(data))
 	copy(d, data)
 	ms.data[key] = d
@@ -162,8 +162,8 @@ func TestBlockFilesystem(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ptrs := make([]uint32, 0)
-	files := make(map[uint32]*testData)
+	ptrs := make([]uint64, 0)
+	files := make(map[uint64]*testData)
 
 	for i := 0; i < 100000; i++ {
 		dice := rand.Intn(10000)
