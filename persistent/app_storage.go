@@ -84,10 +84,16 @@ func (as *AppStorage) State() (*State, error) {
 }
 
 func (as *AppStorage) Get(ctx context.Context, ptr uint64) ([]byte, error) {
+	if as.state == nil {
+		return nil, fmt.Errorf("app: transaction not active")
+	}
 	return as.base.Get(ctx, ptr+1)
 }
 
 func (as *AppStorage) Set(ctx context.Context, ptr uint64, data []byte) error {
+	if as.state == nil {
+		return fmt.Errorf("app: transaction not active")
+	}
 	return as.base.Set(ctx, ptr+1, data)
 }
 
