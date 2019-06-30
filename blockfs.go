@@ -48,7 +48,7 @@ func NewBlockFilesystem(store *persistent.AppStorage, numPtrs, dataSize int64) (
 	}, nil
 }
 
-func (bfs *BlockFilesystem) blockSize() int64 { return 4*bfs.numPtrs + 3 + bfs.dataSize }
+func (bfs *BlockFilesystem) blockSize() int64 { return 8*bfs.numPtrs + 3 + bfs.dataSize }
 
 // allocate returns the pointer of a block which is free for use by the caller.
 func (bfs *BlockFilesystem) allocate(ctx context.Context) (uint64, error) {
@@ -480,8 +480,8 @@ func parseBlock(bfs *BlockFilesystem, raw []byte) (*block, error) {
 	// Read pointers.
 	ptrs := make([]uint64, bfs.numPtrs)
 	for i := 0; i < len(ptrs); i++ {
-		ptrs[i] = uint64(readInt(raw[:4]))
-		raw = raw[4:]
+		ptrs[i] = uint64(readInt(raw[:8]))
+		raw = raw[8:]
 	}
 
 	// Read length of application data.
@@ -524,8 +524,8 @@ func (b *block) Marshal() []byte {
 
 	// Write pointers.
 	for i := 0; i < len(b.ptrs); i++ {
-		writeInt(int(b.ptrs[i]), rest[:4])
-		rest = rest[4:]
+		writeInt(int(b.ptrs[i]), rest[:8])
+		rest = rest[8:]
 	}
 
 	// Write length of application data.

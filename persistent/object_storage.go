@@ -5,15 +5,6 @@ import (
 	"errors"
 )
 
-func dup(in []byte) []byte {
-	if in == nil {
-		return nil
-	}
-	out := make([]byte, len(in))
-	copy(out, in)
-	return out
-}
-
 type memory map[string][]byte
 
 // NewMemory returns an object storage backend that simply stores data

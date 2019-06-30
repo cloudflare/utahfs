@@ -17,45 +17,6 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
-// memStorage implements the BlockStorage interface over a map.
-type memStorage struct {
-	state *persistent.State
-	data  map[uint64][]byte
-}
-
-func newMemStorage() persistent.BlockStorage {
-	return memStorage{
-		state: persistent.NewState(),
-		data:  make(map[uint64][]byte),
-	}
-}
-
-func (ms memStorage) Start(ctx context.Context) error { return nil }
-
-func (ms memStorage) State() (*persistent.State, error) {
-	return ms.state, nil
-}
-
-func (ms memStorage) Get(ctx context.Context, key uint64) ([]byte, error) {
-	d, ok := ms.data[key]
-	if !ok {
-		return nil, persistent.ErrObjectNotFound
-	}
-	data := make([]byte, len(d))
-	copy(data, d)
-	return data, nil
-}
-
-func (ms memStorage) Set(ctx context.Context, key uint64, data []byte) error {
-	d := make([]byte, len(data))
-	copy(d, data)
-	ms.data[key] = d
-	return nil
-}
-
-func (ms memStorage) Commit(ctx context.Context) error { return nil }
-func (ms memStorage) Rollback(ctx context.Context)     {}
-
 type testData struct {
 	bf   *BlockFile
 	pos  int
@@ -153,7 +114,7 @@ func testBFS(t *testing.T, td *testData) {
 func TestBlockFilesystem(t *testing.T) {
 	ctx := context.Background()
 
-	store := persistent.NewAppStorage(newMemStorage())
+	store := persistent.NewAppStorage(persistent.NewBlockMemory())
 	if err := store.Start(ctx); err != nil {
 		t.Fatal(err)
 	}

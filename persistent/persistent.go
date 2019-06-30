@@ -53,3 +53,12 @@ type BlockStorage interface {
 	Commit(ctx context.Context) error
 	Rollback(ctx context.Context)
 }
+
+func dup(in []byte) []byte {
+	if in == nil {
+		return nil
+	}
+	out := make([]byte, len(in))
+	copy(out, in)
+	return out
+}

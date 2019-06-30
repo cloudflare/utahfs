@@ -7,25 +7,25 @@ import (
 	"github.com/hashicorp/golang-lru"
 )
 
-type simpleReliableStorage struct {
+type simpleReliable struct {
 	base ObjectStorage
 }
 
-// NewSimpleReliableStorage returns a ReliableStorage implementation, intended
-// for testing. It simply panics if the atomicity of a transaction is broken.
-func NewSimpleReliableStorage(base ObjectStorage) ReliableStorage {
-	return &simpleReliableStorage{base}
+// NewSimpleReliable returns a ReliableStorage implementation, intended for
+// testing. It simply panics if the atomicity of a transaction is broken.
+func NewSimpleReliable(base ObjectStorage) ReliableStorage {
+	return &simpleReliable{base}
 }
 
-func (srs *simpleReliableStorage) Start(ctx context.Context) error { return nil }
+func (sr *simpleReliable) Start(ctx context.Context) error { return nil }
 
-func (srs *simpleReliableStorage) Get(ctx context.Context, key string) ([]byte, error) {
-	return srs.base.Get(ctx, key)
+func (sr *simpleReliable) Get(ctx context.Context, key string) ([]byte, error) {
+	return sr.base.Get(ctx, key)
 }
 
-func (srs *simpleReliableStorage) Commit(ctx context.Context, writes map[string][]byte) error {
+func (sr *simpleReliable) Commit(ctx context.Context, writes map[string][]byte) error {
 	for key, val := range writes {
-		if err := srs.base.Set(ctx, key, val); err != nil {
+		if err := sr.base.Set(ctx, key, val); err != nil {
 			panic(err)
 		}
 	}

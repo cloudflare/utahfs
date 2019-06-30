@@ -47,7 +47,7 @@ func main() {
 	}
 
 	buffered := persistent.NewBufferedStorage(relStore)
-	block := persistent.NewSimpleBlockStorage(buffered)
+	block := persistent.NewSimpleBlock(buffered)
 	appStore := persistent.NewAppStorage(block)
 
 	bfs, err := utahfs.NewBlockFilesystem(appStore, 12, 32*1024)
