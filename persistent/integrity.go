@@ -119,28 +119,35 @@ func dataPtr(ptr uint64) uint64 {
 	return ptr + offset
 }
 
-// checkBlocks returns the path from the leaf data block at `ptr` to the root of
-// the tree. Each element of the returned slice is one level: the first number
-// is the pointer of the checksum block, and the second number is the hash in
-// the checksum block to check.
-func checkBlocks(ptr, nodes uint64) [][2]uint64 {
-	max := nodes - 1
-	checks := make([][2]uint64, 0)
+// checksumPtr returns the pointer to the checksum block at the given level in
+// the tree, with the given offset from the left.
+func checksumPtr(level int, offset uint64) uint64 {
+	// Compute the pointer of the last data block within the subtree. The
+	// integrity block is going to be `level`+1 blocks after that.
+	nodesPerSubtree := uint64(1) << (3 * uint(level+1))
+	lastBlock := dataPtr(nodesPerSubtree*(offset+1) - 1)
 
-	n := uint64(8)
+	return lastBlock + uint64(level) + 1
+}
+
+// checksumBlocks returns the path from the leaf data block at `ptr` to the root
+// of the tree. Each element of the returned slice is one level: the first
+// number is id of the checksum block within its level, and the second number is
+// the id of the hash in the checksum block to check.
+func checksumBlocks(ptr, nodes uint64) (out [][2]uint64) {
+	max := nodes - 1
+
 	for i := uint64(0); i < 21; i++ {
-		block := n*(ptr/8) + n + i + 1
-		checks = append(checks, [2]uint64{block, ptr % 8})
+		out = append(out, [2]uint64{ptr / 8, ptr % 8})
 
 		max = max / 8
 		if max == 0 {
 			break
 		}
 		ptr = ptr / 8
-		n = 8 * n
 	}
 
-	return checks
+	return out
 }
 
 func leafHash(data []byte) [32]byte {
@@ -209,6 +216,37 @@ func (i *integrity) Start(ctx context.Context) error {
 	return nil
 }
 
+// getChecksum returns the checksum block at the given level in the tree, with
+// the given offset from the left. It is recursively computed if it does not
+// exist, which can happen if the Merkle tree has gaps.
+func (i *integrity) getChecksum(ctx context.Context, level int, offset uint64) ([]byte, error) {
+	block, err := i.base.Get(ctx, checksumPtr(level, offset))
+	if err == nil {
+		return block, nil
+	} else if err != ErrObjectNotFound {
+		return nil, err
+	} // err == ErrObjectNotFound
+
+	out := make([]byte, 8*32)
+	if level == 0 {
+		return out, nil
+	}
+	nodesPerSubtree := uint64(1) << (3 * uint(level))
+	for j := uint64(0); j < 8; j++ {
+		k := 8*offset + j
+		if nodesPerSubtree*k >= i.curr.Nodes {
+			break
+		}
+		block, err := i.getChecksum(ctx, level-1, k)
+		if err != nil {
+			return nil, err
+		}
+		expected := intermediateHash(block)
+		copy(out[32*j:], expected[:])
+	}
+	return out, nil
+}
+
 func (i *integrity) Get(ctx context.Context, ptr uint64) ([]byte, error) {
 	if ptr >= i.curr.Nodes {
 		return nil, ErrObjectNotFound
@@ -219,16 +257,14 @@ func (i *integrity) Get(ctx context.Context, ptr uint64) ([]byte, error) {
 	}
 	expected := leafHash(data)
 
-	for _, check := range checkBlocks(ptr, i.curr.Nodes) {
-		block, err := i.base.Get(ctx, check[0])
-		if err == ErrObjectNotFound {
-			block = make([]byte, 8*32)
-		} else if err != nil {
+	for level, check := range checksumBlocks(ptr, i.curr.Nodes) {
+		block, err := i.getChecksum(ctx, level, check[0])
+		if err != nil {
 			return nil, err
 		} else if len(block) != 8*32 {
 			return nil, fmt.Errorf("integrity: checksum block is malformed")
-		}
-		if !bytes.Equal(expected[:], block[32*check[1]:32*check[1]+32]) {
+		} else if !bytes.Equal(expected[:], block[32*check[1]:32*check[1]+32]) {
+			log.Printf("%x: %x %v %v", expected, block, check[1], ptr)
 			return nil, fmt.Errorf("integrity: block does not equal expected value")
 		}
 		expected = intermediateHash(block)
@@ -250,17 +286,15 @@ func (i *integrity) Set(ctx context.Context, ptr uint64, data []byte) error {
 	}
 	expected := leafHash(data)
 
-	for _, check := range checkBlocks(ptr, i.curr.Nodes) {
-		block, err := i.base.Get(ctx, check[0])
-		if err == ErrObjectNotFound {
-			block = make([]byte, 8*32)
-		} else if err != nil {
+	for level, check := range checksumBlocks(ptr, i.curr.Nodes) {
+		block, err := i.getChecksum(ctx, level, check[0])
+		if err != nil {
 			return err
 		} else if len(block) != 8*32 {
 			return fmt.Errorf("integrity: checksum block is malformed")
 		}
 		copy(block[32*check[1]:], expected[:])
-		if err := i.base.Set(ctx, check[0], block); err != nil {
+		if err := i.base.Set(ctx, checksumPtr(level, check[0]), block); err != nil {
 			return err
 		}
 		expected = intermediateHash(block)
