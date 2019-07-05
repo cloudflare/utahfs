@@ -34,13 +34,13 @@ func (sr *simpleReliable) Commit(ctx context.Context, writes map[string][]byte) 
 
 type cache struct {
 	base  ReliableStorage
-	cache *lru.Cache
+	cache *lru.TwoQueueCache
 }
 
 // NewCache wraps a base object storage backend with an LRU cache of the
 // requested size.
 func NewCache(base ReliableStorage, size int) (ReliableStorage, error) {
-	c, err := lru.New(size)
+	c, err := lru.New2Q(size)
 	if err != nil {
 		return nil, err
 	}
