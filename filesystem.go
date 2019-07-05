@@ -553,7 +553,7 @@ func (fs *filesystem) rmNode(ctx context.Context, parent *node, name string) err
 func (fs *filesystem) synchronize(ctx context.Context) func() {
 	fs.mu.Lock()
 	if err := fs.nm.Start(ctx); err != nil {
-		log.Fatal(err)
+		log.Println(err)
 	}
 	return func() {
 		if r := recover(); r != nil {
