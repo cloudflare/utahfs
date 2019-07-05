@@ -264,7 +264,6 @@ func (i *integrity) Get(ctx context.Context, ptr uint64) ([]byte, error) {
 		} else if len(block) != 8*32 {
 			return nil, fmt.Errorf("integrity: checksum block is malformed")
 		} else if !bytes.Equal(expected[:], block[32*check[1]:32*check[1]+32]) {
-			log.Printf("%x: %x %v %v", expected, block, check[1], ptr)
 			return nil, fmt.Errorf("integrity: block does not equal expected value")
 		}
 		expected = intermediateHash(block)

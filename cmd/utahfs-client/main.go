@@ -1,3 +1,5 @@
+// Command utahfs-client provides a FUSE binding, backed by an encrypted object
+// storage provider.
 package main
 
 import (
@@ -7,9 +9,10 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"path/filepath"
 
 	"github.com/Bren2010/utahfs"
-	"github.com/Bren2010/utahfs/persistent"
+	"github.com/Bren2010/utahfs/cmd/internal/config"
 
 	"github.com/jacobsa/fuse"
 	"github.com/jacobsa/fuse/fuseutil"
@@ -19,53 +22,24 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError) // Overwrite the fucking glog flags.
+	configPath := flag.String("cfg", "./utahfs.yaml", "Location of the client's config file.")
+	mountPath := flag.String("mount", "./utahfs", "Directory to mount as remote drive.")
 	verbose := flag.Bool("v", false, "Enable debug logging.")
 	flag.Parse()
 
-	volume := path.Base(flag.Arg(0))
-	if volume == "." || volume == "/" {
-		log.Fatalf("failed to parse mount path")
+	fullMountPath, err := filepath.Abs(*mountPath)
+	if err != nil {
+		log.Fatalf("failed to resolve mount path: %v", err)
 	}
+	volume := path.Base(fullMountPath)
 
-	store, err := persistent.NewS3(
-		os.Getenv("S3_APP_ID"), os.Getenv("S3_APP_KEY"),
-		os.Getenv("S3_BUCKET"), os.Getenv("S3_URL"), os.Getenv("S3_REGION"),
-	)
+	cfg, err := config.ClientFromFile(*configPath)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("failed to load config: %v", err)
 	}
-	store, err = persistent.NewRetry(store, 3)
+	bfs, err := cfg.FS(fullMountPath)
 	if err != nil {
-		log.Fatal(err)
-	}
-
-	walPath := path.Join(path.Dir(flag.Arg(0)), "utahfs-wal")
-	relStore, err := persistent.NewLocalWAL(store, walPath, 32*512)
-	if err != nil {
-		log.Fatal(err)
-	}
-	relStore, err = persistent.NewCache(relStore, 32*1024)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	buffered := persistent.NewBufferedStorage(relStore)
-	block := persistent.NewSimpleBlock(buffered)
-
-	pinFile := path.Join(path.Dir(flag.Arg(0)), "utahfs-pin.json")
-	block, err = persistent.WithIntegrity(block, os.Getenv("UTAHFS_PASSWORD"), pinFile)
-	if err != nil {
-		log.Fatal(err)
-	}
-	block, err = persistent.WithEncryption(block, os.Getenv("UTAHFS_PASSWORD"))
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	appStore := persistent.NewAppStorage(block)
-	bfs, err := utahfs.NewBlockFilesystem(appStore, 12, 32*1024)
-	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("failed to initialize storage: %v", err)
 	}
 
 	fs, err := utahfs.NewFilesystem(bfs)
@@ -74,15 +48,15 @@ func main() {
 	}
 	server := fuseutil.NewFileSystemServer(fs)
 
-	cfg := &fuse.MountConfig{
+	mountCfg := &fuse.MountConfig{
 		FSName:      volume,
 		ErrorLogger: log.New(os.Stderr, "fuse: ", log.Flags()),
 		VolumeName:  volume,
 	}
 	if *verbose {
-		cfg.DebugLogger = log.New(os.Stderr, "fuse-debug: ", log.Flags())
+		mountCfg.DebugLogger = log.New(os.Stderr, "fuse-debug: ", log.Flags())
 	}
-	mfs, err := fuse.Mount(flag.Arg(0), server, cfg)
+	mfs, err := fuse.Mount(fullMountPath, server, mountCfg)
 	if err != nil {
 		log.Fatal(err)
 	}

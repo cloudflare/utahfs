@@ -139,11 +139,12 @@
   revision = "e517b90714f7c0eabe6d2e570a5886ae077d6db6"
 
 [[projects]]
-  digest = "1:7097829edd12fd7211fca0d29496b44f94ef9e6d72f88fb64f3d7b06315818ad"
+  digest = "1:eb04f69c8991e52eff33c428bd729e04208bf03235be88e4df0d88497c6861b9"
   name = "github.com/prometheus/client_golang"
   packages = [
     "prometheus",
     "prometheus/internal",
+    "prometheus/promhttp",
   ]
   pruneopts = "UT"
   revision = "4ab88e80c249ed361d3299e2930427d9ac43ef8d"
@@ -225,6 +226,14 @@
   pruneopts = "UT"
   revision = "9ac0cf0dab1a77a5c25e0e38e6b8e493385f1add"
 
+[[projects]]
+  digest = "1:4d2e5a73dc1500038e504a8d78b986630e3626dc027bc030ba5c75da257cdb96"
+  name = "gopkg.in/yaml.v2"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "51d6538a90f86fe93ac480b35f37b2be17fef232"
+  version = "v2.2.2"
+
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
@@ -239,11 +248,13 @@
     "github.com/jacobsa/fuse/fuseops",
     "github.com/jacobsa/fuse/fuseutil",
     "github.com/prometheus/client_golang/prometheus",
+    "github.com/prometheus/client_golang/prometheus/promhttp",
     "github.com/syndtr/goleveldb/leveldb",
     "github.com/syndtr/goleveldb/leveldb/opt",
     "github.com/syndtr/goleveldb/leveldb/util",
     "golang.org/x/crypto/pbkdf2",
     "gopkg.in/kothar/go-backblaze.v0",
+    "gopkg.in/yaml.v2",
   ]
   solver-name = "gps-cdcl"
   solver-version = 1

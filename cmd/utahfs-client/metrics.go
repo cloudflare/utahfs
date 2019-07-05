@@ -10,21 +10,16 @@ import (
 	"github.com/Bren2010/utahfs/persistent"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
+
+func init() {
+	prometheus.MustRegister(persistent.AppStorageCommits)
+	prometheus.MustRegister(persistent.LocalWALSize)
+}
 
 // metrics registers metrics with Prometheus and starts the server.
 func metrics() {
-	registry := []prometheus.Collector{
-		persistent.AppStorageCommits, persistent.LocalWALSize,
-	}
-
-	for i, coll := range registry {
-		err := prometheus.Register(coll)
-		if err != nil {
-			log.Fatalf("%v (metric %v)", err, i)
-		}
-	}
-
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(rw http.ResponseWriter, req *http.Request) {
 		if req.URL.Path == "/" {
@@ -34,7 +29,7 @@ func metrics() {
 			fmt.Fprintln(rw, "404 not found")
 		}
 	})
-	mux.Handle("/metrics", prometheus.Handler())
+	mux.Handle("/metrics", promhttp.Handler())
 
 	mux.HandleFunc("/debug/pprof/", pprof.Index)
 	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
