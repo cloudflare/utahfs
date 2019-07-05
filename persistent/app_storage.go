@@ -5,7 +5,14 @@ import (
 	"context"
 	"encoding/gob"
 	"fmt"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
+
+var AppStorageCommits = prometheus.NewCounter(prometheus.CounterOpts{
+	Name: "app_storage_commits",
+	Help: "The number of successful app storage transactions committed.",
+})
 
 // State contains all of the shared global state of a deployment.
 type State struct {
@@ -115,6 +122,7 @@ func (as *AppStorage) Commit(ctx context.Context) error {
 	}
 	as.original, as.state = nil, nil
 
+	AppStorageCommits.Inc()
 	return nil
 }
 

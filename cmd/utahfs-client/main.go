@@ -87,6 +87,7 @@ func main() {
 		log.Fatal(err)
 	}
 	go handleInterrupt(mfs.Dir())
+	go metrics()
 
 	log.Println("filesystem successfully mounted")
 	if err := mfs.Join(context.Background()); err != nil {

@@ -10,6 +10,16 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/util"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
+
+var LocalWALSize = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "local_wal_size",
+		Help: "The number of entries in the local WAL.",
+	},
+	[]string{"path"},
 )
 
 type localWAL struct {
@@ -18,6 +28,7 @@ type localWAL struct {
 	base  ObjectStorage
 	local *leveldb.DB
 
+	path      string
 	maxSize   int
 	currSize  int
 	lastCount time.Time
@@ -39,12 +50,19 @@ func NewLocalWAL(base ObjectStorage, path string, maxSize int) (ReliableStorage,
 		base:  base,
 		local: local,
 
+		path:      path,
 		maxSize:   maxSize,
 		currSize:  0,
 		lastCount: time.Time{},
 		wake:      make(chan struct{}),
 	}
 	go wal.drain()
+	go func() {
+		for {
+			time.Sleep(10 * time.Second)
+			wal.count()
+		}
+	}()
 
 	return wal, nil
 }
@@ -129,6 +147,7 @@ func (lw *localWAL) count() (int, error) {
 	lw.currSize = count
 	lw.mu.Unlock()
 
+	LocalWALSize.WithLabelValues(lw.path).Set(float64(count))
 	return count, nil
 }
 
