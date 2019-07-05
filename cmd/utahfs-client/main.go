@@ -48,8 +48,18 @@ func main() {
 
 	buffered := persistent.NewBufferedStorage(relStore)
 	block := persistent.NewSimpleBlock(buffered)
-	appStore := persistent.NewAppStorage(block)
 
+	pinFile := path.Join(path.Dir(flag.Arg(0)), "utahfs-pin.json")
+	block, err = persistent.WithIntegrity(block, os.Getenv("UTAHFS_PASSWORD"), pinFile)
+	if err != nil {
+		log.Fatal(err)
+	}
+	block, err = persistent.WithEncryption(block, os.Getenv("UTAHFS_PASSWORD"))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	appStore := persistent.NewAppStorage(block)
 	bfs, err := utahfs.NewBlockFilesystem(appStore, 12, 32*1024)
 	if err != nil {
 		log.Fatal(err)
