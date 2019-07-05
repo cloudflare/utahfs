@@ -17,6 +17,9 @@ import (
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
+
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError) // Overwrite the fucking glog flags.
+	verbose := flag.Bool("v", false, "Enable debug logging.")
 	flag.Parse()
 
 	volume := path.Base(flag.Arg(0))
@@ -72,12 +75,12 @@ func main() {
 	server := fuseutil.NewFileSystemServer(fs)
 
 	cfg := &fuse.MountConfig{
-		FSName: volume,
-
+		FSName:      volume,
 		ErrorLogger: log.New(os.Stderr, "fuse: ", log.Flags()),
-		DebugLogger: log.New(os.Stderr, "fuse-debug: ", log.Flags()),
-
-		VolumeName: volume,
+		VolumeName:  volume,
+	}
+	if *verbose {
+		cfg.DebugLogger = log.New(os.Stderr, "fuse-debug: ", log.Flags())
 	}
 	mfs, err := fuse.Mount(flag.Arg(0), server, cfg)
 	if err != nil {
