@@ -204,8 +204,9 @@ type Server struct {
 
 	StorageProvider *StorageProvider `yaml:"storage-provider"`
 
-	MaxWALSize int `yaml:"max-wal-size"` // Max number of blocks to put in WAL before blocking on remote storage. Default: 320*1024 blocks
-	CacheSize  int `yaml:"cache-size"`   // Size of on-disk LRU cache. Default: 3200*1024 blocks, -1 to disable.
+	MaxWALSize    int `yaml:"max-wal-size"`    // Max number of blocks to put in WAL before blocking on remote storage. Default: 320*1024 blocks
+	DiskCacheSize int `yaml:"disk-cache-size"` // Size of on-disk LRU cache. Default: 3200*1024 blocks, -1 to disable.
+	MemCacheSize  int `yaml:"mem-cache-size"`  // Size of in-memory LRU cache. Default: 32*1024 blocks, -1 to disable.
 
 	TransportKey string `yaml:"transport-key"` // Pre-shared key for authenticating client and server.
 }
@@ -233,12 +234,12 @@ func (s *Server) Server() (*http.Server, error) {
 		return nil, err
 	}
 
-	// Setup caching if desired.
-	if s.CacheSize == 0 {
-		s.CacheSize = 3200 * 1024
+	// Setup on-disk caching if desired.
+	if s.DiskCacheSize == 0 {
+		s.DiskCacheSize = 3200 * 1024
 	}
-	if s.CacheSize != -1 {
-		store, err = persistent.NewDiskCache(store, path.Join(s.DataDir, "cache"), s.CacheSize)
+	if s.DiskCacheSize != -1 {
+		store, err = persistent.NewDiskCache(store, path.Join(s.DataDir, "cache"), s.DiskCacheSize)
 		if err != nil {
 			return nil, err
 		}
@@ -251,6 +252,17 @@ func (s *Server) Server() (*http.Server, error) {
 	relStore, err := persistent.NewLocalWAL(store, path.Join(s.DataDir, "wal"), s.MaxWALSize)
 	if err != nil {
 		return nil, err
+	}
+
+	// Setup in-memory caching if desired.
+	if s.MemCacheSize == 0 {
+		s.MemCacheSize = 32 * 1024
+	}
+	if s.MemCacheSize != -1 {
+		relStore, err = persistent.NewCache(relStore, s.MemCacheSize)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Setup the server we want to expose.

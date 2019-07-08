@@ -13,6 +13,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"path"
 
 	"golang.org/x/crypto/pbkdf2"
 )
@@ -318,7 +319,9 @@ func (i *integrity) Commit(ctx context.Context) error {
 
 	// Write the new tree head to disk as well, but fail-open if it doesn't work
 	// because the transaction is already committed.
-	if err = ioutil.WriteFile(i.pinFile, data, 0744); err != nil {
+	if err := os.MkdirAll(path.Dir(i.pinFile), 0744); err != nil {
+		log.Printf("integrity: failed to create directory for pin file: %v", err)
+	} else if err := ioutil.WriteFile(i.pinFile, data, 0744); err != nil {
 		log.Printf("integrity: failed to write pin file: %v", err)
 	}
 

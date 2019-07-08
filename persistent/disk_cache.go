@@ -4,6 +4,7 @@ import (
 	"container/heap"
 	"context"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/syndtr/goleveldb/leveldb"
@@ -77,6 +78,8 @@ func (kh *keysHeap) remove(key string) {
 }
 
 type diskCache struct {
+	mu sync.Mutex
+
 	base ObjectStorage
 	size int
 
@@ -141,6 +144,9 @@ func (dc *diskCache) removeFromCache(key string) {
 }
 
 func (dc *diskCache) Get(ctx context.Context, key string) ([]byte, error) {
+	dc.mu.Lock()
+	defer dc.mu.Unlock()
+
 	data, err := dc.db.Get([]byte(key), nil)
 	if err == leveldb.ErrNotFound {
 		data, err = dc.base.Get(ctx, key)
@@ -157,6 +163,9 @@ func (dc *diskCache) Get(ctx context.Context, key string) ([]byte, error) {
 }
 
 func (dc *diskCache) Set(ctx context.Context, key string, data []byte) error {
+	dc.mu.Lock()
+	defer dc.mu.Unlock()
+
 	if err := dc.base.Set(ctx, key, data); err != nil {
 		dc.removeFromCache(key)
 		return err
@@ -166,6 +175,9 @@ func (dc *diskCache) Set(ctx context.Context, key string, data []byte) error {
 }
 
 func (dc *diskCache) Delete(ctx context.Context, key string) error {
+	dc.mu.Lock()
+	defer dc.mu.Unlock()
+
 	dc.removeFromCache(key)
 	return dc.base.Delete(ctx, key)
 }

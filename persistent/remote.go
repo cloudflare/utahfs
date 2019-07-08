@@ -136,6 +136,7 @@ func NewRemoteClient(transportKey, serverUrl string) (ReliableStorage, error) {
 	if err != nil {
 		return nil, err
 	}
+	cfg.ServerName = "utahfs-server"
 	// Code below is copied from net/http and slightly modified.
 	client := &http.Client{
 		Transport: &http.Transport{
@@ -232,6 +233,12 @@ func (rc *remoteClient) maintain() {
 		}
 
 		if err := rc.post(ctx, "ping?id="+id, nil); err != nil {
+			// Sometimes we'll ping a transaction that was closed after we got
+			// the current id but before the server saw our ping request. It's
+			// easiest to just ignore these errors.
+			if strings.HasSuffix(err.Error(), "401 Unauthorized") {
+				continue
+			}
 			log.Println(err)
 		}
 	}
@@ -279,7 +286,12 @@ func (rc *remoteClient) Commit(ctx context.Context, writes map[string][]byte) er
 	if err := json.NewEncoder(buff).Encode(writes); err != nil {
 		return err
 	}
-	return rc.post(ctx, "commit?id="+id, buff)
+	err := rc.post(ctx, "commit?id="+id, buff)
+
+	rc.mu.Lock()
+	rc.id = ""
+	rc.mu.Unlock()
+	return err
 }
 
 type remoteServer struct {
@@ -359,11 +371,8 @@ func (rs *remoteServer) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 
 func (rs *remoteServer) handleStart(rw http.ResponseWriter, req *http.Request) {
 	rs.requestMu.Unlock()
-
 	rs.transactionMu.Lock()
-
 	rs.requestMu.Lock()
-	defer rs.requestMu.Unlock()
 
 	// In case we were hanging for a long time on the lock, quickly check if the
 	// client is still here.
@@ -383,6 +392,7 @@ func (rs *remoteServer) handleStart(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 	rs.transactionId = req.Form.Get("id")
+	rs.lastCheckIn = time.Now()
 
 	rw.WriteHeader(http.StatusOK)
 }
