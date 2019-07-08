@@ -25,6 +25,7 @@ func main() {
 	configPath := flag.String("cfg", "./utahfs.yaml", "Location of the client's config file.")
 	mountPath := flag.String("mount", "./utahfs", "Directory to mount as remote drive.")
 	verbose := flag.Bool("v", false, "Enable debug logging.")
+	metricsAddr := flag.String("metrics-addr", "localhost:3001", "Address to serve metrics on.")
 	flag.Parse()
 
 	fullMountPath, err := filepath.Abs(*mountPath)
@@ -61,7 +62,7 @@ func main() {
 		log.Fatal(err)
 	}
 	go handleInterrupt(mfs.Dir())
-	go metrics()
+	go metrics(*metricsAddr)
 
 	log.Println("filesystem successfully mounted")
 	if err := mfs.Join(context.Background()); err != nil {

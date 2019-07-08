@@ -22,7 +22,7 @@ func metrics(addr string) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(rw http.ResponseWriter, req *http.Request) {
 		if req.URL.Path == "/" {
-			fmt.Fprintln(rw, "Hello, I'm a utahfs-client's metrics and debugging server! Who are you?")
+			fmt.Fprintln(rw, "Hello, I'm a utahfs-server's metrics and debugging server! Who are you?")
 		} else {
 			http.NotFound(rw, req)
 		}

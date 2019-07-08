@@ -27,11 +27,11 @@ import (
 	"golang.org/x/crypto/pbkdf2"
 )
 
-func generateConfig(password, hostname string) (*tls.Config, error) {
+func generateConfig(transportKey, hostname string) (*tls.Config, error) {
 	curve := elliptic.P256()
 
 	// Generate root CA certificate.
-	key := pbkdf2.Key([]byte(password), []byte("da61d4a0469fdb7f"), 4096, 32, sha1.New)
+	key := pbkdf2.Key([]byte(transportKey), []byte("da61d4a0469fdb7f"), 4096, 32, sha1.New)
 	caD := new(big.Int).SetBytes(key)
 	caD.Mod(caD, curve.Params().N)
 	caPriv := &ecdsa.PrivateKey{D: caD}
@@ -122,7 +122,7 @@ type remoteClient struct {
 // and writes to a remote server.
 //
 // The corresponding server implementation is in NewRemoteServer.
-func NewRemoteClient(password, serverUrl string) (ReliableStorage, error) {
+func NewRemoteClient(transportKey, serverUrl string) (ReliableStorage, error) {
 	parsed, err := url.Parse(serverUrl)
 	if err != nil {
 		return nil, err
@@ -132,7 +132,7 @@ func NewRemoteClient(password, serverUrl string) (ReliableStorage, error) {
 		return nil, fmt.Errorf("remote: server url must end with / (forward slash)")
 	}
 
-	cfg, err := generateConfig(password, "utahfs-client")
+	cfg, err := generateConfig(transportKey, "utahfs-client")
 	if err != nil {
 		return nil, err
 	}
@@ -295,8 +295,8 @@ type remoteServer struct {
 // allowing remote clients to make requests to it.
 //
 // The corresponding client implementation is in NewRemoteClient.
-func NewRemoteServer(base ReliableStorage, password string) (*http.Server, error) {
-	cfg, err := generateConfig(password, "utahfs-server")
+func NewRemoteServer(base ReliableStorage, transportKey string) (*http.Server, error) {
+	cfg, err := generateConfig(transportKey, "utahfs-server")
 	if err != nil {
 		return nil, err
 	}
@@ -318,7 +318,7 @@ func (rs *remoteServer) maintain() {
 		time.Sleep(1 * time.Second)
 
 		rs.requestMu.Lock()
-		if time.Since(rs.lastCheckIn) > 5*time.Second {
+		if rs.transactionId != "" && time.Since(rs.lastCheckIn) > 5*time.Second {
 			rs.transactionMu.Unlock()
 			rs.transactionId = ""
 			rs.lastCheckIn = time.Time{}
