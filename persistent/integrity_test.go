@@ -9,7 +9,12 @@ import (
 	"io/ioutil"
 	mrand "math/rand"
 	"os"
+	"time"
 )
+
+func init() {
+	mrand.Seed(time.Now().UnixNano())
+}
 
 func TestIntegrity(t *testing.T) {
 	ctx := context.Background()
