@@ -5,10 +5,12 @@ import (
 	"io/ioutil"
 	"net/http"
 	"path"
+	"syscall"
 
 	"github.com/Bren2010/utahfs"
 	"github.com/Bren2010/utahfs/persistent"
 
+	"golang.org/x/crypto/ssh/terminal"
 	"gopkg.in/yaml.v2"
 )
 
@@ -81,7 +83,7 @@ type Client struct {
 
 	RemoteServer *RemoteServer `yaml:"remote-server"`
 
-	Password string `yaml:"password"` // Password for encryption and integrity. Mandatory.
+	Password string `yaml:"password"` // Password for encryption and integrity. User will be prompted if not provided.
 
 	NumPtrs  int64 `yaml:"num-ptrs"`  // Number of pointers in a file's skiplist. Default: 12
 	DataSize int64 `yaml:"data-size"` // Amount of data kept in each of a file's blocks. Default: 32 KiB
@@ -144,7 +146,7 @@ func (c *Client) remoteStorage() (persistent.ReliableStorage, error) {
 	return persistent.NewRemoteClient(c.RemoteServer.TransportKey, c.RemoteServer.URL)
 }
 
-func (c *Client) FS(mountPath string) (*utahfs.BlockFilesystem, error) { // NOTE: Check that transport password is not same as encryption password
+func (c *Client) FS(mountPath string) (*utahfs.BlockFilesystem, error) {
 	if c.DataDir == "" {
 		c.DataDir = path.Join(path.Dir(mountPath), ".utahfs")
 	}
@@ -170,7 +172,14 @@ func (c *Client) FS(mountPath string) (*utahfs.BlockFilesystem, error) { // NOTE
 
 	// Setup encryption and integrity.
 	if c.Password == "" {
-		return nil, fmt.Errorf("no password given for encryption")
+		fmt.Print("Password: ")
+		password, err := terminal.ReadPassword(int(syscall.Stdin))
+		if err != nil {
+			return nil, fmt.Errorf("failed reading password from stdin")
+		} else if len(password) == 0 {
+			return nil, fmt.Errorf("no password given for encryption")
+		}
+		c.Password = string(password)
 	}
 	block, err = persistent.WithIntegrity(block, c.Password, path.Join(c.DataDir, "pin.json"))
 	if err != nil {
