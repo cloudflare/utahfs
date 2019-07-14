@@ -3,12 +3,14 @@ package persistent
 import (
 	"container/heap"
 	"context"
+	"database/sql"
 	"log"
+	"os"
+	"path"
 	"sync"
 	"time"
 
-	"github.com/syndtr/goleveldb/leveldb"
-	"github.com/syndtr/goleveldb/leveldb/util"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 type keysHeap struct {
@@ -84,13 +86,20 @@ type diskCache struct {
 	size int
 
 	keys *keysHeap
-	db   *leveldb.DB
+	db   *sql.DB
 }
 
 // NewDiskCache wraps a base object storage backend with a large on-disk LRU
-// cache stored at `path`.
-func NewDiskCache(base ObjectStorage, path string, size int) (ObjectStorage, error) {
-	db, err := leveldb.OpenFile(path, nil)
+// cache stored at `loc`.
+func NewDiskCache(base ObjectStorage, loc string, size int) (ObjectStorage, error) {
+	if err := os.MkdirAll(path.Dir(loc), 0744); err != nil {
+		return nil, err
+	}
+	db, err := sql.Open("sqlite3", loc)
+	if err != nil {
+		return nil, err
+	}
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS cache (key text not null primary key, val bytea);`)
 	if err != nil {
 		return nil, err
 	}
@@ -98,14 +107,23 @@ func NewDiskCache(base ObjectStorage, path string, size int) (ObjectStorage, err
 	// List all keys in the cache and build a heap.
 	kh := newKeysHeap(size)
 
-	iter := db.NewIterator(&util.Range{nil, nil}, nil)
-	for iter.Next() {
-		kh.Push(string(iter.Key()))
-	}
-	iter.Release()
-	if err := iter.Error(); err != nil {
+	rows, err := db.Query("SELECT key FROM cache;")
+	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		kh.Push(key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
 
 	heap.Init(kh)
 
@@ -120,7 +138,8 @@ func NewDiskCache(base ObjectStorage, path string, size int) (ObjectStorage, err
 
 func (dc *diskCache) addToCache(key string, data []byte) {
 	// Add this key to the cache.
-	if err := dc.db.Put([]byte(key), data, nil); err != nil {
+	_, err := dc.db.Exec("INSERT OR REPLACE INTO cache (key, val) VALUES (?, ?)", key, data)
+	if err != nil {
 		log.Println(err)
 		return
 	}
@@ -129,7 +148,7 @@ func (dc *diskCache) addToCache(key string, data []byte) {
 	// Evict from the cache until we're back at/below the target size.
 	for dc.keys.Len() > dc.size {
 		key := heap.Pop(dc.keys).(string)
-		if err := dc.db.Delete([]byte(key), nil); err != nil {
+		if _, err := dc.db.Exec("DELETE FROM cache WHERE key = ?", key); err != nil {
 			log.Println(err)
 			return
 		}
@@ -138,7 +157,7 @@ func (dc *diskCache) addToCache(key string, data []byte) {
 
 func (dc *diskCache) removeFromCache(key string) {
 	dc.keys.remove(key)
-	if err := dc.db.Delete([]byte(key), nil); err != nil {
+	if _, err := dc.db.Exec("DELETE FROM cache WHERE key = ?", key); err != nil {
 		log.Println(err)
 	}
 }
@@ -147,8 +166,9 @@ func (dc *diskCache) Get(ctx context.Context, key string) ([]byte, error) {
 	dc.mu.Lock()
 	defer dc.mu.Unlock()
 
-	data, err := dc.db.Get([]byte(key), nil)
-	if err == leveldb.ErrNotFound {
+	var data []byte
+	err := dc.db.QueryRow("SELECT val FROM cache WHERE key = ?", key).Scan(&data)
+	if err == sql.ErrNoRows {
 		data, err = dc.base.Get(ctx, key)
 		if err != nil {
 			return nil, err

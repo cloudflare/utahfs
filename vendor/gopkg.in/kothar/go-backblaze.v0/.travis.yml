@@ -7,11 +7,9 @@ os:
   - osx
 
 go:
-  - 1.7.x
-  - 1.8.x
   - 1.9.x
   - 1.10.x
-#  - 1.11.x
+  - 1.11.x
 
 before_install:
   # our 'canonical import path' is gopkg.in-based, not github.com
@@ -29,7 +27,9 @@ install:
 
 script:
  - go vet ./...
- - diff <(goimports -l . | grep -v _ffjson.go) <(printf "")
- - diff <(golint ./... | grep -v _ffjson.go) <(printf "")
+ # this is to work around differences in gofmt between 1.9/1.10/1.11
+ - "go version | egrep 'go1.9.|go1.10.' > /dev/null && sed -i -e 's/valid:                    true/valid: true/' backblaze.go || true"
+ - diff <(goimports -l .) <(printf "")
+ - diff <(golint ./...) <(printf "")
  - go test -v -cpu=2 ./...
  - go test -v -cpu=1,2,4 -short -race ./...

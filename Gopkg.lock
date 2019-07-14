@@ -2,7 +2,7 @@
 
 
 [[projects]]
-  digest = "1:5344074fc61cdd651d9c5466c6ade70dee6d17d976da8e2a2f5e3acc026a61da"
+  digest = "1:ebf48eb21b295261e4258142c3f1776471d5152778b816633891be067d7a4510"
   name = "github.com/aws/aws-sdk-go"
   packages = [
     "aws",
@@ -42,8 +42,8 @@
     "service/sts",
   ]
   pruneopts = "UT"
-  revision = "471204b4ff86c9c417adb58cec55079c06d16213"
-  version = "v1.20.15"
+  revision = "420cda5d6383f94f7d9c231aa44bad3325181950"
+  version = "v1.20.20"
 
 [[projects]]
   digest = "1:d6afaeed1502aa28e80a4ed0981d570ad91b2579193404256ce672ed0a609e0d"
@@ -62,20 +62,12 @@
   revision = "23def4e6c14b4da8ac2ed8007337bc5eb5007998"
 
 [[projects]]
-  digest = "1:318f1c959a8a740366fce4b1e1eb2fd914036b4af58fbd0a003349b305f118ad"
+  digest = "1:573ca21d3669500ff845bdebee890eb7fc7f0f50c59f2132f2a0c6b03d85086a"
   name = "github.com/golang/protobuf"
   packages = ["proto"]
   pruneopts = "UT"
-  revision = "b5d812f8a3706043e23a9cd5babf2e5423744d30"
-  version = "v1.3.1"
-
-[[projects]]
-  digest = "1:e4f5819333ac698d294fe04dbf640f84719658d5c7ce195b10060cc37292ce79"
-  name = "github.com/golang/snappy"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "2a8bb927dd31d8daada140a5d09578521ce5c36a"
-  version = "v0.0.1"
+  revision = "6c65a5562fc06764971b7c5d05c76c75e84bdbf7"
+  version = "v1.3.2"
 
 [[projects]]
   branch = "master"
@@ -117,6 +109,14 @@
   packages = ["."]
   pruneopts = "UT"
   revision = "c2b33e84"
+
+[[projects]]
+  digest = "1:4a49346ca45376a2bba679ca0e83bec949d780d4e927931317904bad482943ec"
+  name = "github.com/mattn/go-sqlite3"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "c7c4067b79cc51e6dfdcef5c702e74b1e0fa7c75"
+  version = "v1.10.0"
 
 [[projects]]
   digest = "1:ff5ebae34cfbf047d505ee150de27e60570e8c394b3b8fdbb720ff6ac71985fc"
@@ -182,27 +182,6 @@
   version = "v0.0.3"
 
 [[projects]]
-  digest = "1:5b180f17d5bc50b765f4dcf0d126c72979531cbbd7f7929bf3edd87fb801ea2d"
-  name = "github.com/syndtr/goleveldb"
-  packages = [
-    "leveldb",
-    "leveldb/cache",
-    "leveldb/comparer",
-    "leveldb/errors",
-    "leveldb/filter",
-    "leveldb/iterator",
-    "leveldb/journal",
-    "leveldb/memdb",
-    "leveldb/opt",
-    "leveldb/storage",
-    "leveldb/table",
-    "leveldb/util",
-  ]
-  pruneopts = "UT"
-  revision = "9d007e481048296f09f59bd19bb7ae584563cd95"
-  version = "v1.0.0"
-
-[[projects]]
   branch = "master"
   digest = "1:35ce874cf16f78a2da908ab28b0277497e36603d289db00d39da5200bc8ace08"
   name = "golang.org/x/crypto"
@@ -215,22 +194,22 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:afb5346f71acefc3da7ad800f952cb2bcdb762194b05304bbf54d7f9490e31c5"
+  digest = "1:31d44814b45607afa77c6e8ef20ea8bacc1d1053fe084440c874f311732e7ec3"
   name = "golang.org/x/sys"
   packages = [
     "unix",
     "windows",
   ]
   pruneopts = "UT"
-  revision = "04f50cda93cbb67f2afa353c52f342100e80e625"
+  revision = "fae7ac547cb717d141c433a2a173315e216b64c4"
 
 [[projects]]
   branch = "master"
-  digest = "1:863b86a1a9cb2aca2ae27e576c345f7eec79ef99bdd74a4d8fdd966af299f2f2"
+  digest = "1:232eb70324974494b1bf9d69df16822b5fdc268cbe93fd55773c9a1f15fc31f6"
   name = "gopkg.in/kothar/go-backblaze.v0"
   packages = ["."]
   pruneopts = "UT"
-  revision = "9ac0cf0dab1a77a5c25e0e38e6b8e493385f1add"
+  revision = "702d4e7eb465dc61b7e320d649f2250d880af512"
 
 [[projects]]
   digest = "1:4d2e5a73dc1500038e504a8d78b986630e3626dc027bc030ba5c75da257cdb96"
@@ -253,11 +232,9 @@
     "github.com/jacobsa/fuse",
     "github.com/jacobsa/fuse/fuseops",
     "github.com/jacobsa/fuse/fuseutil",
+    "github.com/mattn/go-sqlite3",
     "github.com/prometheus/client_golang/prometheus",
     "github.com/prometheus/client_golang/prometheus/promhttp",
-    "github.com/syndtr/goleveldb/leveldb",
-    "github.com/syndtr/goleveldb/leveldb/opt",
-    "github.com/syndtr/goleveldb/leveldb/util",
     "golang.org/x/crypto/pbkdf2",
     "golang.org/x/crypto/ssh/terminal",
     "gopkg.in/kothar/go-backblaze.v0",

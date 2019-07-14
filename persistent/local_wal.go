@@ -1,15 +1,17 @@
 package persistent
 
 import (
-	"bytes"
 	"context"
+	"database/sql"
+	"fmt"
 	"log"
+	"os"
+	"path"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/syndtr/goleveldb/leveldb"
-	"github.com/syndtr/goleveldb/leveldb/opt"
-	"github.com/syndtr/goleveldb/leveldb/util"
+	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -26,23 +28,31 @@ type localWAL struct {
 	mu sync.Mutex
 
 	base  ObjectStorage
-	local *leveldb.DB
+	local *sql.DB
 
-	path      string
-	maxSize   int
+	loc     string
+	maxSize int
+	wake    chan struct{}
+
 	currSize  int
 	lastCount time.Time
-	wake      chan struct{}
 }
 
 // NewLocalWAL returns a ReliableStorage implementation that achieves reliable
 // writes over a base object storage provider by buffering writes in a
-// Write-Ahead Log (WAL) stored at `path`.
+// Write-Ahead Log (WAL) stored at `loc`.
 //
 // The WAL may have at least `maxSize` buffered entries before new writes start
 // blocking on old writes being flushed.
-func NewLocalWAL(base ObjectStorage, path string, maxSize int) (ReliableStorage, error) {
-	local, err := leveldb.OpenFile(path, nil)
+func NewLocalWAL(base ObjectStorage, loc string, maxSize int) (ReliableStorage, error) {
+	if err := os.MkdirAll(path.Dir(loc), 0744); err != nil {
+		return nil, err
+	}
+	local, err := sql.Open("sqlite3", loc)
+	if err != nil {
+		return nil, err
+	}
+	_, err = local.Exec(`CREATE TABLE IF NOT EXISTS wal (id integer not null primary key, key text, val bytea); CREATE INDEX by_key ON wal(key);`)
 	if err != nil {
 		return nil, err
 	}
@@ -50,11 +60,12 @@ func NewLocalWAL(base ObjectStorage, path string, maxSize int) (ReliableStorage,
 		base:  base,
 		local: local,
 
-		path:      path,
-		maxSize:   maxSize,
+		loc:     loc,
+		maxSize: maxSize,
+		wake:    make(chan struct{}),
+
 		currSize:  0,
 		lastCount: time.Time{},
-		wake:      make(chan struct{}),
 	}
 	go wal.drain()
 	go func() {
@@ -83,44 +94,48 @@ func (lw *localWAL) drain() {
 }
 
 func (lw *localWAL) drainOnce() error {
-	iter := lw.local.NewIterator(&util.Range{nil, nil}, nil)
-	for i := 0; iter.Next(); i++ {
-		key, val := iter.Key(), iter.Value()
+	var ids []string
 
-		if val != nil {
-			if err := lw.base.Set(context.Background(), string(key), val); err != nil {
+	rows, err := lw.local.Query("SELECT id, key, val FROM wal;")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			id  int
+			key string
+			val []byte
+		)
+		if err := rows.Scan(&id, &key, &val); err != nil {
+			return err
+		}
+
+		if len(val) > 0 {
+			if err := lw.base.Set(context.Background(), key, val); err != nil {
 				return err
 			}
 		} else {
-			if err := lw.base.Delete(context.Background(), string(key)); err != nil {
+			if err := lw.base.Delete(context.Background(), key); err != nil {
 				return err
 			}
 		}
-		if err := lw.drop(key, val); err != nil {
-			return err
-		}
+		ids = append(ids, fmt.Sprint(id))
 	}
-	iter.Release()
-	if err := iter.Error(); err != nil {
+	if err := rows.Err(); err != nil {
 		return err
 	}
+	rows.Close()
 
+	if len(ids) == 0 {
+		return nil
+	}
+	_, err = lw.local.Exec("DELETE FROM wal WHERE id in (" + strings.Join(ids, ",") + ")")
+	if err != nil {
+		return err
+	}
 	return nil
-}
-
-func (lw *localWAL) drop(key, val []byte) error {
-	lw.mu.Lock()
-	defer lw.mu.Unlock()
-
-	cand, err := lw.local.Get(key, nil)
-	if err == leveldb.ErrNotFound {
-		return nil
-	} else if err != nil {
-		return err
-	} else if !bytes.Equal(val, cand) {
-		return nil
-	}
-	return lw.local.Delete(key, nil)
 }
 
 func (lw *localWAL) count() (int, error) {
@@ -132,13 +147,9 @@ func (lw *localWAL) count() (int, error) {
 	}
 	lw.mu.Unlock()
 
-	count := 0
-	iter := lw.local.NewIterator(&util.Range{nil, nil}, nil)
-	for iter.Next() {
-		count++
-	}
-	iter.Release()
-	if err := iter.Error(); err != nil {
+	var count int
+	err := lw.local.QueryRow("SELECT COUNT(*) FROM wal;").Scan(&count)
+	if err != nil {
 		return 0, err
 	}
 
@@ -147,7 +158,7 @@ func (lw *localWAL) count() (int, error) {
 	lw.currSize = count
 	lw.mu.Unlock()
 
-	LocalWALSize.WithLabelValues(lw.path).Set(float64(count))
+	LocalWALSize.WithLabelValues(lw.loc).Set(float64(count))
 	return count, nil
 }
 
@@ -176,15 +187,16 @@ func (lw *localWAL) Start(ctx context.Context) error {
 }
 
 func (lw *localWAL) Get(ctx context.Context, key string) ([]byte, error) {
-	data, err := lw.local.Get([]byte(key), nil)
-	if err == leveldb.ErrNotFound {
+	var val []byte
+	err := lw.local.QueryRow("SELECT val FROM wal WHERE key = ?;", key).Scan(&val)
+	if err == sql.ErrNoRows {
 		return lw.base.Get(ctx, key)
-	} else if data == nil {
+	} else if len(val) == 0 {
 		return nil, ErrObjectNotFound
 	} else if err != nil {
 		return nil, err
 	}
-	return data, nil
+	return val, nil
 }
 
 func (lw *localWAL) Commit(ctx context.Context, writes map[string][]byte) error {
@@ -192,14 +204,30 @@ func (lw *localWAL) Commit(ctx context.Context, writes map[string][]byte) error 
 		return nil
 	}
 
-	batch := new(leveldb.Batch)
-	for key, val := range writes {
-		batch.Put([]byte(key), dup(val))
-	}
-	lw.mu.Lock()
-	defer lw.mu.Unlock()
-	if err := lw.local.Write(batch, &opt.WriteOptions{Sync: true}); err != nil {
+	tx, err := lw.local.Begin()
+	if err != nil {
 		return err
 	}
-	return nil
+	delStmt, err := tx.Prepare("DELETE FROM wal WHERE key = ?;")
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	insertStmt, err := tx.Prepare("INSERT INTO wal (key, val) VALUES (?, ?);")
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	for key, val := range writes {
+		if _, err := delStmt.Exec(key); err != nil {
+			tx.Rollback()
+			return err
+		} else if _, err := insertStmt.Exec(key, val); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+
+	return tx.Commit()
 }

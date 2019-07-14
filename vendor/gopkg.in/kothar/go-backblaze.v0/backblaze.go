@@ -24,9 +24,14 @@ const (
 //
 // The application key is a 40-digit hex number that you can get from
 // your account page on backblaze.com.
+//
+// The key id is the application key id that you get when generating an
+// application key. If using the master application key, leave this set
+// to an empty string as your account id will be used instead.
 type Credentials struct {
 	AccountID      string
 	ApplicationKey string
+	KeyID          string
 }
 
 // B2 implements a B2 API client. Do not modify state concurrently.
@@ -119,7 +124,14 @@ func (c *B2) internalAuthorizeAccount() error {
 	if err != nil {
 		return err
 	}
-	req.SetBasicAuth(c.AccountID, c.ApplicationKey)
+
+	// Support the use of application keys. If a KeyID is not explicitly set,
+	// use the account ID as the key ID
+	keyID := c.KeyID
+	if keyID == "" {
+		keyID = c.AccountID
+	}
+	req.SetBasicAuth(keyID, c.ApplicationKey)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -134,7 +146,13 @@ func (c *B2) internalAuthorizeAccount() error {
 	// Store token
 	c.auth = &authorizationState{
 		authorizeAccountResponse: authResponse,
-		valid: true,
+		valid:                    true,
+	}
+
+	// Set AccountID to the returned value from authorizeAccountResponse
+	// This is for when an Application Key is used instead of Master Application Key
+	if c.AccountID == "" {
+		c.AccountID = authResponse.AccountID
 	}
 
 	return nil
