@@ -94,48 +94,60 @@ func (lw *localWAL) drain() {
 }
 
 func (lw *localWAL) drainOnce() error {
-	var ids []string
-
-	rows, err := lw.local.Query("SELECT id, key, val FROM wal;")
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
+	for {
 		var (
-			id  int
-			key string
-			val []byte
+			ids  []string
+			keys []string
+			vals [][]byte
 		)
-		if err := rows.Scan(&id, &key, &val); err != nil {
+		rows, err := lw.local.Query("SELECT id, key, val FROM wal LIMIT 100;")
+		if err != nil {
 			return err
 		}
 
-		if len(val) > 0 {
-			if err := lw.base.Set(context.Background(), key, val); err != nil {
+		for rows.Next() {
+			var (
+				id  int
+				key string
+				val []byte
+			)
+			if err := rows.Scan(&id, &key, &val); err != nil {
+				rows.Close()
 				return err
 			}
-		} else {
-			if err := lw.base.Delete(context.Background(), key); err != nil {
-				return err
+			ids = append(ids, fmt.Sprint(id))
+			keys = append(keys, key)
+			vals = append(vals, val)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+		if len(ids) == 0 {
+			return nil
+		}
+
+		// Write entries read from the WAL to the underlying storage. This is
+		// done outside of the database query to prevent blocking other threads.
+		for i, _ := range ids {
+			key, val := keys[i], vals[i]
+			if len(val) > 0 {
+				if err := lw.base.Set(context.Background(), key, val); err != nil {
+					return err
+				}
+			} else {
+				if err := lw.base.Delete(context.Background(), key); err != nil {
+					return err
+				}
 			}
 		}
-		ids = append(ids, fmt.Sprint(id))
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	rows.Close()
 
-	if len(ids) == 0 {
-		return nil
+		_, err = lw.local.Exec("DELETE FROM wal WHERE id in (" + strings.Join(ids, ",") + ")")
+		if err != nil {
+			return err
+		}
 	}
-	_, err = lw.local.Exec("DELETE FROM wal WHERE id in (" + strings.Join(ids, ",") + ")")
-	if err != nil {
-		return err
-	}
-	return nil
 }
 
 func (lw *localWAL) count() (int, error) {
