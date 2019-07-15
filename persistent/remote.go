@@ -3,7 +3,6 @@ package persistent
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -109,6 +108,47 @@ func generateConfig(transportKey, hostname string) (*tls.Config, error) {
 	return cfg, nil
 }
 
+func writeMap(w io.Writer, data map[string][]byte) error {
+	for key, val := range data {
+		if len(key) > 255 || len(val) > 16777215 {
+			return fmt.Errorf("remote: unable to serialize map")
+		}
+		hdr := []byte{
+			byte(len(key)),
+			byte(len(val)), byte(len(val) >> 8), byte(len(val) >> 16),
+		}
+		if _, err := w.Write(hdr); err != nil {
+			return err
+		} else if _, err := w.Write([]byte(key)); err != nil {
+			return err
+		} else if _, err := w.Write(val); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func readMap(r io.Reader) (map[string][]byte, error) {
+	out := make(map[string][]byte)
+
+	for {
+		hdr := make([]byte, 4)
+		if _, err := io.ReadFull(r, hdr); err == io.EOF {
+			return out, nil
+		} else if err != nil {
+			return nil, err
+		}
+		key := make([]byte, int(hdr[0]))
+		val := make([]byte, int(hdr[1])+int(hdr[2])<<8+int(hdr[3])<<16)
+		if _, err := io.ReadFull(r, key); err != nil {
+			return nil, err
+		} else if _, err := io.ReadFull(r, val); err != nil {
+			return nil, err
+		}
+		out[string(key)] = val
+	}
+}
+
 type remoteClient struct {
 	mu sync.Mutex
 
@@ -151,7 +191,8 @@ func NewRemoteClient(transportKey, serverUrl string) (ReliableStorage, error) {
 			TLSHandshakeTimeout:   10 * time.Second,
 			ExpectContinueTimeout: 1 * time.Second,
 
-			TLSClientConfig: cfg,
+			TLSClientConfig:    cfg,
+			DisableCompression: true,
 		},
 
 		Timeout: 30 * time.Second,
@@ -283,7 +324,7 @@ func (rc *remoteClient) Commit(ctx context.Context, writes map[string][]byte) er
 		return fmt.Errorf("remote: transaction not active")
 	}
 	buff := &bytes.Buffer{}
-	if err := json.NewEncoder(buff).Encode(writes); err != nil {
+	if err := writeMap(buff, writes); err != nil {
 		return err
 	}
 	err := rc.post(ctx, "commit?id="+id, buff)
@@ -431,8 +472,8 @@ func (rs *remoteServer) handleCommit(rw http.ResponseWriter, req *http.Request) 
 		rs.lastCheckIn = time.Time{}
 	}()
 
-	writes := make(map[string][]byte)
-	if err := json.NewDecoder(req.Body).Decode(&writes); err != nil {
+	writes, err := readMap(req.Body)
+	if err != nil {
 		log.Println(err)
 		rw.WriteHeader(http.StatusBadRequest)
 		return
