@@ -164,6 +164,10 @@ func (fs *filesystem) GetInodeAttributes(ctx context.Context, op *fuseops.GetIno
 }
 
 func (fs *filesystem) SetInodeAttributes(ctx context.Context, op *fuseops.SetInodeAttributesOp) error {
+	return fs.setInodeAttributes(ctx, op, false)
+}
+
+func (fs *filesystem) setInodeAttributes(ctx context.Context, op *fuseops.SetInodeAttributesOp, archive bool) error {
 	defer fs.synchronize(ctx)()
 
 	nd, err := fs.nm.Open(ctx, fs.ptr(op.Inode))
@@ -176,7 +180,9 @@ func (fs *filesystem) SetInodeAttributes(ctx context.Context, op *fuseops.SetIno
 	}
 
 	if op.Size != nil {
-		if err := nd.Truncate(int64(*op.Size)); err != nil {
+		if *op.Size < nd.Attrs.Size && archive {
+			return fmt.Errorf("utahfs: refusing to truncate archived file")
+		} else if err := nd.Truncate(int64(*op.Size)); err != nil {
 			return err
 		}
 	}
@@ -265,6 +271,10 @@ func (fs *filesystem) CreateSymlink(ctx context.Context, op *fuseops.CreateSymli
 }
 
 func (fs *filesystem) Rename(ctx context.Context, op *fuseops.RenameOp) error {
+	return fs.rename(ctx, op, false)
+}
+
+func (fs *filesystem) rename(ctx context.Context, op *fuseops.RenameOp, archive bool) error {
 	defer fs.synchronize(ctx)()
 
 	if op.OldParent == op.NewParent && op.OldName == op.NewName {
@@ -287,7 +297,7 @@ func (fs *filesystem) Rename(ctx context.Context, op *fuseops.RenameOp) error {
 	if err != nil {
 		return err
 	} else if _, ok := newParent.Children[op.NewName]; ok {
-		if err := fs.rmNode(ctx, newParent, op.NewName); err != nil {
+		if err := fs.rmNode(ctx, newParent, op.NewName, archive); err != nil {
 			return err
 		}
 	}
@@ -313,12 +323,16 @@ func (fs *filesystem) RmDir(ctx context.Context, op *fuseops.RmDirOp) error {
 }
 
 func (fs *filesystem) Unlink(ctx context.Context, op *fuseops.UnlinkOp) error {
+	return fs.unlink(ctx, op, false)
+}
+
+func (fs *filesystem) unlink(ctx context.Context, op *fuseops.UnlinkOp, archive bool) error {
 	defer fs.synchronize(ctx)()
 
 	parent, err := fs.nm.Open(ctx, fs.ptr(op.Parent))
 	if err != nil {
 		return err
-	} else if err := fs.rmNode(ctx, parent, op.Name); err != nil {
+	} else if err := fs.rmNode(ctx, parent, op.Name, archive); err != nil {
 		return err
 	}
 
@@ -441,6 +455,10 @@ func (fs *filesystem) ReadFile(ctx context.Context, op *fuseops.ReadFileOp) erro
 }
 
 func (fs *filesystem) WriteFile(ctx context.Context, op *fuseops.WriteFileOp) error {
+	return fs.writeFile(ctx, op, false)
+}
+
+func (fs *filesystem) writeFile(ctx context.Context, op *fuseops.WriteFileOp, archive bool) error {
 	defer fs.synchronize(ctx)()
 
 	nd, err := fs.nm.Open(ctx, fs.ptr(op.Inode))
@@ -448,7 +466,15 @@ func (fs *filesystem) WriteFile(ctx context.Context, op *fuseops.WriteFileOp) er
 		return err
 	} else if !nd.Attrs.Mode.IsRegular() {
 		return fuse.EINVAL
-	} else if _, err := nd.WriteAt(op.Data, op.Offset); err != nil {
+	}
+
+	if archive {
+		if err := checkForChanges(nd, op); err != nil {
+			return err
+		}
+	}
+
+	if _, err := nd.WriteAt(op.Data, op.Offset); err != nil {
 		return err
 	}
 	nd.Attrs.Mtime = now()
@@ -509,7 +535,7 @@ func (fs *filesystem) mkNode(ctx context.Context, parentID fuseops.InodeID, name
 	} else if _, ok := parent.Children[name]; ok {
 		return nil, nil, fuse.EEXIST
 	}
-	parent.Attrs.Mtime = now()
+	parent.Attrs.Mtime = now() // NOTE
 	parent.Attrs.Ctime = now()
 	parent.Children[name] = childID
 
@@ -520,14 +546,11 @@ func (fs *filesystem) mkNode(ctx context.Context, parentID fuseops.InodeID, name
 	return parent, child, nil
 }
 
-func (fs *filesystem) rmNode(ctx context.Context, parent *node, name string) error {
+func (fs *filesystem) rmNode(ctx context.Context, parent *node, name string, archive bool) error {
 	childID, ok := parent.Children[name]
 	if !ok {
 		return fuse.ENOENT
 	}
-	parent.Attrs.Mtime = now()
-	parent.Attrs.Ctime = now()
-	delete(parent.Children, name)
 
 	child, err := fs.nm.Open(ctx, fs.ptr(childID))
 	if err != nil {
@@ -537,7 +560,9 @@ func (fs *filesystem) rmNode(ctx context.Context, parent *node, name string) err
 	}
 	child.Attrs.Nlink--
 	if child.Attrs.Nlink == 0 {
-		if err := fs.nm.Unlink(ctx, fs.ptr(childID)); err != nil {
+		if archive && child.Attrs.Mode.IsRegular() {
+			return fmt.Errorf("utahfs: refusing to delete archived file")
+		} else if err := fs.nm.Unlink(ctx, fs.ptr(childID)); err != nil {
 			return err
 		}
 	} else {
@@ -546,6 +571,10 @@ func (fs *filesystem) rmNode(ctx context.Context, parent *node, name string) err
 			return err
 		}
 	}
+
+	parent.Attrs.Mtime = now()
+	parent.Attrs.Ctime = now()
+	delete(parent.Children, name) // NOTE: Audit that we don't modify structs before committing.
 
 	return nil
 }
