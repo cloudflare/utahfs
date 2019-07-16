@@ -21,6 +21,11 @@ import (
 // github.com/GoogleCloudPlatform/gcsfuse. If some decision seems weird, it
 // might be justified in that codebase.
 
+// Note: If a function modifies a node, that node must immediately be passed
+// into commit() to be persisted, or forgotten if there's an error persisting.
+// If there's an error path that could cause the function to return before
+// getting to commit(), then the function must manually forget the node.
+
 func now() time.Time {
 	return time.Now().Round(time.Second)
 }
@@ -46,11 +51,17 @@ func myUserAndGroup() (uint32, uint32, error) {
 func commit(ctx context.Context, nm *nodeManager, nds ...*node) error {
 	for _, nd := range nds {
 		if err := nd.Persist(); err != nil {
+			for _, nd := range nds {
+				nm.Forget(nd)
+			}
 			log.Println(err)
 			return fuse.EIO
 		}
 	}
 	if err := nm.Commit(ctx); err != nil {
+		for _, nd := range nds {
+			nm.Forget(nd)
+		}
 		log.Println(err)
 		return fuse.EIO
 	}
@@ -261,6 +272,8 @@ func (fs *filesystem) CreateSymlink(ctx context.Context, op *fuseops.CreateSymli
 	if err != nil {
 		return err
 	} else if _, err := child.WriteAt([]byte(op.Target), 0); err != nil {
+		fs.nm.Forget(parent)
+		fs.nm.Forget(child)
 		return err
 	}
 	op.Entry.Child = parent.Children[op.Name]
@@ -475,6 +488,7 @@ func (fs *filesystem) writeFile(ctx context.Context, op *fuseops.WriteFileOp, ar
 	}
 
 	if _, err := nd.WriteAt(op.Data, op.Offset); err != nil {
+		fs.nm.Forget(nd)
 		return err
 	}
 	nd.Attrs.Mtime = now()
@@ -535,14 +549,15 @@ func (fs *filesystem) mkNode(ctx context.Context, parentID fuseops.InodeID, name
 	} else if _, ok := parent.Children[name]; ok {
 		return nil, nil, fuse.EEXIST
 	}
-	parent.Attrs.Mtime = now() // NOTE
-	parent.Attrs.Ctime = now()
-	parent.Children[name] = childID
-
 	child, err := fs.nm.Open(ctx, childPtr)
 	if err != nil {
 		return nil, nil, err
 	}
+
+	parent.Attrs.Mtime = now()
+	parent.Attrs.Ctime = now()
+	parent.Children[name] = childID
+
 	return parent, child, nil
 }
 
@@ -558,6 +573,7 @@ func (fs *filesystem) rmNode(ctx context.Context, parent *node, name string, arc
 	} else if len(child.Children) > 0 {
 		return fuse.ENOTEMPTY
 	}
+	fs.nm.Forget(child)
 	child.Attrs.Nlink--
 	if child.Attrs.Nlink == 0 {
 		if archive && child.Attrs.Mode.IsRegular() {
@@ -574,7 +590,7 @@ func (fs *filesystem) rmNode(ctx context.Context, parent *node, name string, arc
 
 	parent.Attrs.Mtime = now()
 	parent.Attrs.Ctime = now()
-	delete(parent.Children, name) // NOTE: Audit that we don't modify structs before committing.
+	delete(parent.Children, name)
 
 	return nil
 }

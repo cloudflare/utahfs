@@ -272,3 +272,7 @@ func (nm *nodeManager) Unlink(ctx context.Context, ptr uint64) error {
 	}
 	return nil
 }
+
+func (nm *nodeManager) Forget(nd *node) {
+	nm.cache.Remove(nd.self.start)
+}
