@@ -43,7 +43,12 @@ func main() {
 		log.Fatalf("failed to initialize storage: %v", err)
 	}
 
-	fs, err := utahfs.NewFilesystem(bfs)
+	var fs fuseutil.FileSystem
+	if cfg.Archive {
+		fs, err = utahfs.NewArchive(bfs)
+	} else {
+		fs, err = utahfs.NewFilesystem(bfs)
+	}
 	if err != nil {
 		log.Fatal(err)
 	}

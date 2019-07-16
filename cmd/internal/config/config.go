@@ -87,6 +87,8 @@ type Client struct {
 
 	NumPtrs  int64 `yaml:"num-ptrs"`  // Number of pointers in a file's skiplist. Default: 12
 	DataSize int64 `yaml:"data-size"` // Amount of data kept in each of a file's blocks. Default: 32 KiB
+
+	Archive bool `yaml:"archive"` // Whether or not to enforce archive mode.
 }
 
 func ClientFromFile(path string) (*Client, error) {
