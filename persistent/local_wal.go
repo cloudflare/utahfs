@@ -52,7 +52,7 @@ func NewLocalWAL(base ObjectStorage, loc string, maxSize int) (ReliableStorage, 
 	if err != nil {
 		return nil, err
 	}
-	_, err = local.Exec(`CREATE TABLE IF NOT EXISTS wal (id integer not null primary key, key text, val bytea); CREATE INDEX by_key ON wal(key);`)
+	_, err = local.Exec(`CREATE TABLE IF NOT EXISTS wal (id integer not null primary key, key text, val bytea); CREATE INDEX IF NOT EXISTS by_key ON wal(key);`)
 	if err != nil {
 		return nil, err
 	}
