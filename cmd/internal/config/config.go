@@ -97,7 +97,7 @@ func ClientFromFile(path string) (*Client, error) {
 		return nil, err
 	}
 	parsed := &Client{}
-	if err = yaml.Unmarshal(raw, parsed); err != nil {
+	if err = yaml.UnmarshalStrict(raw, parsed); err != nil {
 		return nil, err
 	}
 	return parsed, nil
@@ -228,7 +228,7 @@ func ServerFromFile(path string) (*Server, error) {
 		return nil, err
 	}
 	parsed := &Server{}
-	if err = yaml.Unmarshal(raw, parsed); err != nil {
+	if err = yaml.UnmarshalStrict(raw, parsed); err != nil {
 		return nil, err
 	}
 	return parsed, nil

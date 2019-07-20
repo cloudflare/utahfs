@@ -225,6 +225,7 @@ func (rc *remoteClient) get(ctx context.Context, loc string) ([]byte, error) {
 	} else if resp.StatusCode == http.StatusNotFound {
 		return nil, ErrObjectNotFound
 	} else if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
 		return nil, fmt.Errorf("remote: unexpected response status: %v: %v", loc, resp.Status)
 	}
 	return ioutil.ReadAll(resp.Body)
@@ -248,8 +249,10 @@ func (rc *remoteClient) post(ctx context.Context, loc string, body io.Reader) er
 	if err != nil {
 		return err
 	} else if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
 		return fmt.Errorf("remote: unexpected response status: %v: %v", loc, resp.Status)
 	}
+	resp.Body.Close()
 	return nil
 }
 
@@ -424,8 +427,7 @@ func (rs *remoteServer) handleStart(rw http.ResponseWriter, req *http.Request) {
 	default:
 	}
 
-	// Start a new transaction, and a goroutine that will stop holding everybody
-	// else up if this client disappears.
+	// Start a new transaction, and record initial information about it.
 	if err := rs.base.Start(req.Context()); err != nil {
 		rs.transactionMu.Unlock()
 		log.Println(err)

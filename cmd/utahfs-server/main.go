@@ -32,6 +32,7 @@ func main() {
 	}
 	server.Addr = *serverAddr
 
+	log.Println("server successfully started")
 	go metrics(*metricsAddr)
 	log.Fatal(server.ListenAndServeTLS("", ""))
 }
