@@ -12,6 +12,9 @@ const nilPtr = ^uint64(0)
 
 var errEndOfBlock = fmt.Errorf("blockfs: reached end of block")
 
+func p(ptr uint64) uint64 { return 2 * ptr }
+func d(ptr uint64) uint64 { return 2*ptr + 1 }
+
 // BlockFilesystem implements large files as skiplists over fixed-size blocks
 // stored in an object storage service.
 type BlockFilesystem struct {
@@ -26,7 +29,7 @@ type BlockFilesystem struct {
 // application data.
 //
 // Recommended values:
-//   numPtrs = 12, dataSize = 512*1024
+//   numPtrs = 12, dataSize = 32*1024
 //
 // This system manages two pieces of global state:
 //   1. trash - Points to the first block of the trash list: a linked list of
@@ -48,7 +51,8 @@ func NewBlockFilesystem(store *persistent.AppStorage, numPtrs, dataSize int64) (
 	}, nil
 }
 
-func (bfs *BlockFilesystem) blockSize() int64 { return 8*bfs.numPtrs + 3 + bfs.dataSize }
+func (bfs *BlockFilesystem) blockPtrsSize() int64 { return 8 * bfs.numPtrs }
+func (bfs *BlockFilesystem) blockDataSize() int64 { return 3 + bfs.dataSize }
 
 // allocate returns the pointer of a block which is free for use by the caller.
 func (bfs *BlockFilesystem) allocate(ctx context.Context) (uint64, error) {
@@ -61,12 +65,12 @@ func (bfs *BlockFilesystem) allocate(ctx context.Context) (uint64, error) {
 		return next, nil
 	}
 
-	data, err := bfs.store.Get(ctx, state.TrashPtr)
+	rawPtrs, err := bfs.store.Get(ctx, p(state.TrashPtr))
 	if err != nil {
 		return nilPtr, err
 	}
-	b, err := parseBlock(bfs, data)
-	if err != nil {
+	b := &block{parent: bfs}
+	if err := b.UnmarshalPtrs(rawPtrs); err != nil {
 		return nilPtr, fmt.Errorf("blockfs: failed to parse block %x: %v", state.TrashPtr, err)
 	}
 	trash := state.TrashPtr
@@ -99,7 +103,7 @@ func (bfs *BlockFilesystem) Create(ctx context.Context) (uint64, *BlockFile, err
 		pos:  0,
 		idx:  0,
 		ptr:  ptr,
-		curr: &block{parent: bfs, ptrs: ptrs},
+		curr: &block{parent: bfs, ptrs: ptrs, data: make([]byte, 0)},
 	}
 	if err := bf.persist(); err != nil {
 		return nilPtr, nil, err
@@ -117,7 +121,7 @@ func (bfs *BlockFilesystem) Open(ctx context.Context, ptr uint64) (*BlockFile, e
 		start: ptr,
 		size:  0,
 	}
-	if err := bf.load(ptr, 0); err != nil {
+	if err := bf.load(ptr, 0, false); err != nil {
 		return nil, err
 	}
 
@@ -142,7 +146,7 @@ func (bfs *BlockFilesystem) Unlink(ctx context.Context, ptr uint64) error {
 		for i := len(bf.curr.ptrs) - 1; i >= 0; i-- {
 			if bf.curr.ptrs[i] == nilPtr {
 				continue
-			} else if err := bf.load(bf.curr.ptrs[i], 0); err != nil {
+			} else if err := bf.load(bf.curr.ptrs[i], 0, false); err != nil {
 				return err
 			}
 			stepped = true
@@ -188,19 +192,35 @@ type BlockFile struct {
 
 // persist saves any changes to the current block to the storage backend.
 func (bf *BlockFile) persist() error {
-	return bf.parent.store.Set(bf.ctx, bf.ptr, bf.curr.Marshal())
+	err := bf.parent.store.Set(bf.ctx, p(bf.ptr), bf.curr.MarshalPtrs())
+	if err != nil {
+		return err
+	} else if bf.curr.data != nil {
+		err := bf.parent.store.Set(bf.ctx, d(bf.ptr), bf.curr.MarshalData())
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // load pulls the block at `ptr` into memory. `pos` is our new position in the
 // file.
-func (bf *BlockFile) load(ptr uint64, pos int64) error {
-	data, err := bf.parent.store.Get(bf.ctx, ptr)
+func (bf *BlockFile) load(ptr uint64, pos int64, data bool) error { // NOTE: Don't load ptrs twice.
+	rawPtrs, err := bf.parent.store.Get(bf.ctx, p(ptr))
 	if err != nil {
 		return err
 	}
-	curr, err := parseBlock(bf.parent, data)
-	if err != nil {
+	curr := &block{parent: bf.parent}
+	if err := curr.UnmarshalPtrs(rawPtrs); err != nil {
 		return fmt.Errorf("blockfs: failed to parse block %x: %v", ptr, err)
+	} else if data {
+		rawData, err := bf.parent.store.Get(bf.ctx, d(ptr))
+		if err != nil {
+			return err
+		} else if err := curr.UnmarshalData(rawData); err != nil {
+			return fmt.Errorf("blockfs: failed to parse block %x: %v", ptr, err)
+		}
 	}
 
 	bf.pos = pos
@@ -222,7 +242,7 @@ func (bf *BlockFile) read(p []byte) (int, error) {
 	if err == errEndOfBlock {
 		if bf.curr.ptrs[0] == nilPtr {
 			return 0, io.EOF
-		} else if err := bf.load(bf.curr.ptrs[0], bf.pos); err != nil {
+		} else if err := bf.load(bf.curr.ptrs[0], bf.pos, true); err != nil {
 			return 0, err
 		}
 		return bf.readAt(p, bf.pos)
@@ -237,10 +257,15 @@ func (bf *BlockFile) readAt(p []byte, offset int64) (int, error) {
 		return 0, errEndOfBlock
 	} else if offset < 0 || offset > bf.parent.dataSize {
 		return 0, fmt.Errorf("blockfs: invalid offset to read from block")
-	} else if offset >= int64(len(bf.curr.data)) {
-		return 0, io.EOF
+	} else if bf.curr.data == nil { // Load the block data if it hasn't been already.
+		if err := bf.load(bf.ptr, bf.pos, true); err != nil {
+			return 0, err
+		}
 	}
 
+	if offset >= int64(len(bf.curr.data)) {
+		return 0, io.EOF
+	}
 	n := copy(p, bf.curr.data[offset:])
 	return n, nil
 }
@@ -277,7 +302,7 @@ func (bf *BlockFile) write(p []byte) (int, error) {
 	if bf.curr.ptrs[0] != nilPtr {
 		if err := bf.persist(); err != nil {
 			return 0, err
-		} else if err := bf.load(bf.curr.ptrs[0], bf.pos); err != nil {
+		} else if err := bf.load(bf.curr.ptrs[0], bf.pos, true); err != nil {
 			return 0, err
 		}
 		return bf.writeAt(p, bf.pos)
@@ -289,7 +314,7 @@ func (bf *BlockFile) write(p []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	ptrs := bf.curr.Upgrade(bf.idx, bf.ptr, ptr)
+	ptrs := bf.curr.Upgrade(bf.idx, bf.ptr, ptr) // NOTE: Are we just changing ptrs here? Unload data if so?
 	if err := bf.persist(); err != nil {
 		return 0, err
 	}
@@ -301,7 +326,7 @@ func (bf *BlockFile) write(p []byte) (int, error) {
 	for i := 1; i < len(ptrs); i++ {
 		if idx%(1<<uint(i)) != 0 {
 			continue
-		} else if err := bf.load(ptrs[i], pos-(1<<uint(i))*bf.parent.dataSize); err != nil {
+		} else if err := bf.load(ptrs[i], pos-(1<<uint(i))*bf.parent.dataSize, false); err != nil {
 			return 0, err
 		}
 		bf.curr.ptrs[i] = ptr
@@ -314,7 +339,7 @@ func (bf *BlockFile) write(p []byte) (int, error) {
 	bf.pos = pos
 	bf.idx = idx
 	bf.ptr = ptr
-	bf.curr = &block{parent: bf.parent, ptrs: ptrs}
+	bf.curr = &block{parent: bf.parent, ptrs: ptrs, data: make([]byte, 0)}
 
 	return bf.writeAt(p, bf.pos)
 }
@@ -325,6 +350,10 @@ func (bf *BlockFile) writeAt(p []byte, offset int64) (int, error) {
 		return 0, errEndOfBlock
 	} else if offset < 0 || offset > bf.parent.dataSize {
 		return 0, fmt.Errorf("blockfs: invalid offset to write to block")
+	} else if bf.curr.data == nil { // Load the block data if it hasn't been already.
+		if err := bf.load(bf.ptr, bf.pos, true); err != nil {
+			return 0, err
+		}
 	}
 
 	// Expand data slice if necessary.
@@ -363,7 +392,7 @@ func (bf *BlockFile) Seek(offset int64, whence int) (int64, error) {
 
 	// Follow the skiplist.
 	if offset < bf.pos {
-		if err := bf.load(bf.start, 0); err != nil {
+		if err := bf.load(bf.start, 0, false); err != nil {
 			return -1, err
 		}
 	}
@@ -394,7 +423,7 @@ func (bf *BlockFile) Seek(offset int64, whence int) (int64, error) {
 			}
 
 			// This pointer will get us as far as possible without going over.
-			if err := bf.load(bf.curr.ptrs[i], pos); err != nil {
+			if err := bf.load(bf.curr.ptrs[i], pos, false); err != nil {
 				return -1, err
 			}
 			stepped = true
@@ -455,6 +484,9 @@ func (bf *BlockFile) Truncate(size int64) error {
 	}
 
 	// Convert this block into a tail block.
+	if err := bf.load(bf.ptr, bf.pos, true); err != nil {
+		return err
+	}
 	bf.curr.ptrs = tailPtrs
 	bf.curr.data = bf.curr.data[:bf.size-endIdx*bf.parent.dataSize]
 	if err := bf.persist(); err != nil {
@@ -470,28 +502,6 @@ type block struct {
 
 	ptrs []uint64 // ptrs contains the skiplist pointers from the current block.
 	data []byte   // data is the block's application data.
-}
-
-func parseBlock(bfs *BlockFilesystem, raw []byte) (*block, error) {
-	if int64(len(raw)) != bfs.blockSize() {
-		return nil, fmt.Errorf("blockfs: unexpected size: %v != %v", len(raw), bfs.blockSize())
-	}
-
-	// Read pointers.
-	ptrs := make([]uint64, bfs.numPtrs)
-	for i := 0; i < len(ptrs); i++ {
-		ptrs[i] = uint64(readInt(raw[:8]))
-		raw = raw[8:]
-	}
-
-	// Read length of application data.
-	size := readInt(raw[:3])
-	raw = raw[3:]
-	if len(raw) < size {
-		return nil, fmt.Errorf("blockfs: application data has unexpected size")
-	}
-
-	return &block{bfs, ptrs, raw[:size]}, nil
 }
 
 // Upgrade modifies this block from a tail into an intermediate and returns the
@@ -518,24 +528,59 @@ func (b *block) Upgrade(currIdx int64, currPtr, nextPtr uint64) []uint64 {
 	return out
 }
 
-func (b *block) Marshal() []byte {
-	out := make([]byte, b.parent.blockSize())
+func (b *block) MarshalPtrs() []byte {
+	out := make([]byte, b.parent.blockPtrsSize())
 	rest := out[0:]
 
-	// Write pointers.
 	for i := 0; i < len(b.ptrs); i++ {
 		writeInt(int(b.ptrs[i]), rest[:8])
 		rest = rest[8:]
 	}
 
-	// Write length of application data.
+	return out
+}
+
+func (b *block) MarshalData() []byte {
+	out := make([]byte, b.parent.blockDataSize())
+	rest := out[0:]
+
+	// Write length.
 	writeInt(len(b.data), rest[:3])
 	rest = rest[3:]
 
-	// Write application data.
+	// Write data.
 	copy(rest, b.data)
 
 	return out
+}
+
+func (b *block) UnmarshalPtrs(raw []byte) error {
+	if int64(len(raw)) != b.parent.blockPtrsSize() {
+		return fmt.Errorf("blockfs: unexpected size: %v != %v", len(raw), b.parent.blockPtrsSize())
+	}
+
+	b.ptrs = make([]uint64, b.parent.numPtrs)
+	for i := 0; i < len(b.ptrs); i++ {
+		b.ptrs[i] = uint64(readInt(raw[:8]))
+		raw = raw[8:]
+	}
+
+	return nil
+}
+
+func (b *block) UnmarshalData(raw []byte) error {
+	if int64(len(raw)) != b.parent.blockDataSize() {
+		return fmt.Errorf("blockfs: unexpected size: %v != %v", len(raw), b.parent.blockDataSize())
+	}
+
+	size := readInt(raw[:3])
+	raw = raw[3:]
+	if len(raw) < size {
+		return fmt.Errorf("blockfs: application data has unexpected size")
+	}
+	b.data = raw[:size]
+
+	return nil
 }
 
 func readInt(in []byte) int {
