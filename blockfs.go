@@ -273,8 +273,8 @@ func (bf *BlockFile) readAt(p []byte, offset int64) (int, error) {
 func (bf *BlockFile) Write(p []byte) (int, error) {
 	n := 0
 
-	for n < len(p) {
-		m, err := bf.write(p[n:])
+	for first := true; n < len(p); first = false {
+		m, err := bf.write(first, p[n:])
 
 		n += m
 		bf.pos += int64(m)
@@ -290,7 +290,7 @@ func (bf *BlockFile) Write(p []byte) (int, error) {
 	return n, bf.persist()
 }
 
-func (bf *BlockFile) write(p []byte) (int, error) {
+func (bf *BlockFile) write(first bool, p []byte) (int, error) {
 	n, err := bf.writeAt(p, bf.pos)
 	if err == nil {
 		return n, nil
@@ -313,6 +313,9 @@ func (bf *BlockFile) write(p []byte) (int, error) {
 	ptr, err := bf.parent.allocate(bf.ctx)
 	if err != nil {
 		return 0, err
+	}
+	if first {
+		bf.curr.data = nil
 	}
 	ptrs := bf.curr.Upgrade(bf.idx, bf.ptr, ptr) // NOTE: Are we just changing ptrs here? Unload data if so?
 	if err := bf.persist(); err != nil {
