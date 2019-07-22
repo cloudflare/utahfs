@@ -1,20 +1,84 @@
 package persistent
 
 import (
+	"bytes"
 	"context"
-	"database/sql"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path"
-	"strings"
 	"sync"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
-
 	"github.com/prometheus/client_golang/prometheus"
 )
+
+func readInt(in []byte) int {
+	out := 0
+	for i := len(in) - 1; i >= 0; i-- {
+		out = out<<8 + int(in[i])
+	}
+	return out
+}
+
+func writeInt(in int, out []byte) {
+	for i := 0; i < len(out); i++ {
+		out[i] = byte(in)
+		in = in >> 8
+	}
+}
+
+type transaction struct {
+	Processed bool
+	Id        uint64
+	Data      map[string][]byte
+}
+
+func readTransaction(r io.Reader) (*transaction, int, error) {
+	hdr := make([]byte, 12)
+	if _, err := io.ReadFull(r, hdr); err != nil {
+		return nil, 0, err
+	} else if hdr[0] != 0 && hdr[0] != 1 {
+		return nil, 0, fmt.Errorf("wal: data is malformed")
+	}
+	id, dataLen := readInt(hdr[1:9]), readInt(hdr[9:12])
+
+	lim := &io.LimitedReader{r, int64(dataLen)}
+	data, err := readMap(lim)
+	if err == io.EOF || err == nil && lim.N != 0 {
+		return nil, 0, io.ErrUnexpectedEOF
+	} else if err != nil {
+		return nil, 0, err
+	}
+
+	return &transaction{
+		Processed: hdr[0] == 1,
+		Id:        uint64(id),
+		Data:      data,
+	}, 12 + dataLen, nil
+}
+
+func writeTransaction(w io.Writer, tx *transaction) error {
+	buff := &bytes.Buffer{}
+	if err := writeMap(buff, tx.Data); err != nil {
+		return err
+	}
+
+	hdr := make([]byte, 12)
+	if tx.Processed {
+		hdr[0] = 1
+	}
+	writeInt(int(tx.Id), hdr[1:9])
+	writeInt(buff.Len(), hdr[9:12])
+
+	if _, err := w.Write(hdr); err != nil {
+		return err
+	} else if _, err := buff.WriteTo(w); err != nil {
+		return err
+	}
+	return nil
+}
 
 var LocalWALSize = prometheus.NewGaugeVec(
 	prometheus.GaugeOpts{
@@ -27,15 +91,20 @@ var LocalWALSize = prometheus.NewGaugeVec(
 type localWAL struct {
 	mu sync.Mutex
 
-	base  ObjectStorage
-	local *sql.DB
-
+	base    ObjectStorage
+	fh      *os.File
 	loc     string
 	maxSize int
-	wake    chan struct{}
 
-	currSize  int
-	lastCount time.Time
+	currSize    int
+	startQueue1 int64
+	endQueue1   int64
+	startQueue2 int64
+	nextTx      uint64
+	txToPos     map[uint64]int64
+	keyToTx     map[string]uint64
+
+	wake chan struct{}
 }
 
 // NewLocalWAL returns a ReliableStorage implementation that achieves reliable
@@ -48,24 +117,87 @@ func NewLocalWAL(base ObjectStorage, loc string, maxSize int) (ReliableStorage, 
 	if err := os.MkdirAll(path.Dir(loc), 0744); err != nil {
 		return nil, err
 	}
-	local, err := sql.Open("sqlite3", loc)
+	fh, err := os.OpenFile(loc, os.O_RDWR|os.O_CREATE, 0744)
 	if err != nil {
 		return nil, err
 	}
-	_, err = local.Exec(`CREATE TABLE IF NOT EXISTS wal (id integer not null primary key, key text, val bytea); CREATE INDEX IF NOT EXISTS by_key ON wal(key);`)
-	if err != nil {
-		return nil, err
-	}
-	wal := &localWAL{
-		base:  base,
-		local: local,
 
+	// Read the WAL to build initial data structures.
+	var (
+		pos = int64(0)
+
+		currSize    = 0
+		startQueue1 = int64(0)
+		endQueue1   = int64(0)
+		startQueue2 = int64(0)
+		nextTx      = uint64(0)
+		txToPos     = make(map[uint64]int64)
+		keyToTx     = make(map[string]uint64)
+
+		foundQueue1 = false
+		foundGap    = false
+		foundQueue2 = false
+	)
+
+	for {
+		t, n, err := readTransaction(fh)
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			return nil, err
+		}
+
+		currSize += len(t.Data)
+
+		if !t.Processed && !foundQueue1 {
+			startQueue1 = pos
+			foundQueue1 = true
+		} else if t.Processed && foundQueue1 && !foundGap {
+			endQueue1 = pos
+			foundGap = true
+		} else if !t.Processed && foundGap && !foundQueue2 {
+			startQueue2 = pos
+			foundQueue2 = true
+		}
+
+		if t.Id >= nextTx {
+			nextTx = t.Id + 1
+		}
+		if !t.Processed {
+			txToPos[t.Id] = pos
+		}
+		for key, _ := range t.Data {
+			prev, ok := keyToTx[key]
+			if !ok || prev < t.Id {
+				keyToTx[key] = t.Id
+			}
+		}
+
+		pos += int64(n)
+	}
+
+	if !foundGap {
+		endQueue1 = pos
+	}
+	if !foundQueue2 {
+		startQueue2 = pos
+	}
+
+	wal := &localWAL{
+		base:    base,
+		fh:      fh,
 		loc:     loc,
 		maxSize: maxSize,
-		wake:    make(chan struct{}),
 
-		currSize:  0,
-		lastCount: time.Time{},
+		currSize:    currSize,
+		startQueue1: startQueue1,
+		endQueue1:   endQueue1,
+		startQueue2: startQueue2,
+		nextTx:      nextTx,
+		txToPos:     txToPos,
+		keyToTx:     keyToTx,
+
+		wake: make(chan struct{}),
 	}
 	go wal.drain()
 	go func() {
@@ -94,84 +226,127 @@ func (lw *localWAL) drain() {
 }
 
 func (lw *localWAL) drainOnce() error {
-	for {
-		var (
-			ids  []string
-			keys []string
-			vals [][]byte
-		)
-		rows, err := lw.local.Query("SELECT id, key, val FROM wal LIMIT 100;")
+	// Fully drain queue 1.
+	lw.mu.Lock()
+	start, end := lw.startQueue1, lw.endQueue1
+	lw.mu.Unlock()
+
+	for start < end {
+		tx, n, err := lw.readQueue(start)
 		if err != nil {
 			return err
-		}
-
-		for rows.Next() {
-			var (
-				id  int
-				key string
-				val []byte
-			)
-			if err := rows.Scan(&id, &key, &val); err != nil {
-				rows.Close()
-				return err
-			}
-			ids = append(ids, fmt.Sprint(id))
-			keys = append(keys, key)
-			vals = append(vals, val)
-		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
+		} else if err := lw.processTx(start, tx); err != nil {
 			return err
 		}
-		rows.Close()
-		if len(ids) == 0 {
-			return nil
+		lw.startQueue1 += int64(n)
+		start, end = lw.startQueue1, lw.endQueue1
+		if start == end {
+			lw.startQueue1, lw.endQueue1 = 0, 0
 		}
-
-		// Write entries read from the WAL to the underlying storage. This is
-		// done outside of the database query to prevent blocking other threads.
-		for i, _ := range ids {
-			key, val := keys[i], vals[i]
-			if len(val) > 0 {
-				if err := lw.base.Set(context.Background(), key, val); err != nil {
-					return err
-				}
-			} else {
-				if err := lw.base.Delete(context.Background(), key); err != nil {
-					return err
-				}
-			}
-		}
-
-		_, err = lw.local.Exec("DELETE FROM wal WHERE id in (" + strings.Join(ids, ",") + ")")
-		if err != nil {
-			return err
-		}
+		lw.mu.Unlock() // mu was left locked by processTx.
 	}
+
+	// Full drain queue 2.
+	lw.mu.Lock()
+	pos := lw.startQueue2
+	lw.mu.Unlock()
+
+	for {
+		tx, n, err := lw.readQueue(pos)
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			return err
+		} else if err := lw.processTx(pos, tx); err != nil {
+			return err
+		}
+		lw.startQueue2 += int64(n)
+		pos = lw.startQueue2
+		lw.mu.Unlock() // mu was left locked by processTx.
+	}
+
+	return nil
 }
 
-func (lw *localWAL) count() (int, error) {
+func (lw *localWAL) readQueue(pos int64) (*transaction, int, error) {
 	lw.mu.Lock()
-	if time.Since(lw.lastCount) < 10*time.Second {
-		curr := lw.currSize
-		lw.mu.Unlock()
-		return curr, nil
+	defer lw.mu.Unlock()
+
+	if _, err := lw.fh.Seek(pos, io.SeekStart); err != nil {
+		return nil, 0, err
+	}
+	tx, n, err := readTransaction(lw.fh)
+	if err != nil {
+		return nil, 0, err
+	} else if tx.Processed {
+		return nil, 0, fmt.Errorf("read already processed entry")
+	}
+	return tx, n, nil
+}
+
+func (lw *localWAL) processTx(pos int64, tx *transaction) error {
+	// Omit any keys that we know have been overwritten in another transaction.
+	writes := make(map[string][]byte)
+
+	lw.mu.Lock()
+	for key, val := range tx.Data {
+		cand, ok := lw.keyToTx[key]
+		if !ok || cand != tx.Id {
+			continue
+		}
+		writes[key] = val
 	}
 	lw.mu.Unlock()
 
-	var count int
-	err := lw.local.QueryRow("SELECT COUNT(*) FROM wal;").Scan(&count)
-	if err != nil {
-		return 0, err
+	// Push all these writes downstream.
+	ctx := context.Background()
+	for key, val := range writes {
+		if val == nil {
+			if err := lw.base.Delete(ctx, key); err != nil {
+				return err
+			}
+		} else {
+			if err := lw.base.Set(ctx, key, val); err != nil {
+				return err
+			}
+		}
 	}
 
 	lw.mu.Lock()
-	lw.lastCount = time.Now()
-	lw.currSize = count
+	// defer lw.mu.Unlock() -- Intentionally left unlocked.
+
+	// Mark this transaction as processed.
+	if _, err := lw.fh.Seek(pos, io.SeekStart); err != nil {
+		lw.mu.Unlock()
+		return err
+	} else if _, err := lw.fh.Write([]byte{1}); err != nil {
+		lw.mu.Unlock()
+		return err
+	}
+
+	lw.currSize -= len(tx.Data)
+
+	// Delete the keys from `keyToTx` that are removed from the WAL now that
+	// this transaction is processed.
+	for key, _ := range tx.Data {
+		cand, ok := lw.keyToTx[key]
+		if !ok || cand != tx.Id {
+			continue
+		}
+		delete(lw.keyToTx, key)
+	}
+
+	delete(lw.txToPos, tx.Id)
+	return nil
+}
+
+func (lw *localWAL) count() int {
+	lw.mu.Lock()
+	count := lw.currSize
 	lw.mu.Unlock()
 
 	LocalWALSize.WithLabelValues(lw.loc).Set(float64(count))
-	return count, nil
+	return count
 }
 
 func (lw *localWAL) Start(ctx context.Context) error {
@@ -180,12 +355,7 @@ func (lw *localWAL) Start(ctx context.Context) error {
 	defer ticker.Stop()
 
 	for {
-		count, err := lw.count()
-		if err != nil {
-			return err
-		}
-
-		if count > lw.maxSize {
+		if lw.count() > lw.maxSize {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -199,15 +369,30 @@ func (lw *localWAL) Start(ctx context.Context) error {
 }
 
 func (lw *localWAL) Get(ctx context.Context, key string) ([]byte, error) {
-	var val []byte
-	err := lw.local.QueryRow("SELECT val FROM wal WHERE key = ?;", key).Scan(&val)
-	if err == sql.ErrNoRows {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
+
+	tx, ok := lw.keyToTx[key]
+	if !ok {
 		return lw.base.Get(ctx, key)
-	} else if len(val) == 0 {
-		return nil, ErrObjectNotFound
-	} else if err != nil {
+	}
+	pos, ok := lw.txToPos[tx]
+	if !ok {
+		panic("key is stored in unknown transaction")
+	}
+
+	if _, err := lw.fh.Seek(pos, io.SeekStart); err != nil {
 		return nil, err
 	}
+	t, _, err := readTransaction(lw.fh)
+	if err != nil {
+		return nil, err
+	}
+	val, ok := t.Data[key]
+	if !ok {
+		panic("transaction does not contain expected key")
+	}
+
 	return val, nil
 }
 
@@ -215,31 +400,50 @@ func (lw *localWAL) Commit(ctx context.Context, writes map[string][]byte) error 
 	if len(writes) == 0 {
 		return nil
 	}
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
 
-	tx, err := lw.local.Begin()
-	if err != nil {
+	id := lw.nextTx
+	pos := int64(0)
+
+	buff1 := &bytes.Buffer{}
+	if err := writeTransaction(buff1, &transaction{false, id, writes}); err != nil {
 		return err
 	}
-	delStmt, err := tx.Prepare("DELETE FROM wal WHERE key = ?;")
-	if err != nil {
-		tx.Rollback()
-		return err
-	}
-	insertStmt, err := tx.Prepare("INSERT INTO wal (key, val) VALUES (?, ?);")
-	if err != nil {
-		tx.Rollback()
+	buff2 := &bytes.Buffer{}
+	if err := writeTransaction(buff2, &transaction{true, 0, nil}); err != nil {
 		return err
 	}
 
-	for key, val := range writes {
-		if _, err := delStmt.Exec(key); err != nil {
-			tx.Rollback()
+	if lw.startQueue2-lw.endQueue1 > int64(buff1.Len()+buff2.Len()) {
+		// Add this data at the end of queue 1, since there's enough room.
+		pos = lw.endQueue1
+		endPos := lw.endQueue1 + int64(buff1.Len())
+
+		if _, err := lw.fh.Seek(pos, io.SeekStart); err != nil {
 			return err
-		} else if _, err := insertStmt.Exec(key, val); err != nil {
-			tx.Rollback()
+		} else if _, err := buff1.WriteTo(lw.fh); err != nil { // Write the actual data.
+			return err
+		} else if _, err := buff2.WriteTo(lw.fh); err != nil { // Write an empty transaction to mark the end of queue1.
+			return err
+		}
+
+		lw.endQueue1 = endPos
+	} else {
+		// Add this data at the end of the file.
+		var err error
+		if pos, err = lw.fh.Seek(0, io.SeekEnd); err != nil {
+			return err
+		} else if _, err := buff1.WriteTo(lw.fh); err != nil {
 			return err
 		}
 	}
 
-	return tx.Commit()
+	lw.currSize += len(writes)
+	lw.nextTx += 1
+	lw.txToPos[id] = pos
+	for key, _ := range writes {
+		lw.keyToTx[key] = id
+	}
+	return nil
 }
