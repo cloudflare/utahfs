@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/Bren2010/utahfs/persistent"
+	"code.cfops.it/~brendan/utahfs/persistent"
 
 	"github.com/hashicorp/golang-lru"
 	"github.com/jacobsa/fuse/fuseops"

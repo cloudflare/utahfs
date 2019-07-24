@@ -10,7 +10,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/Bren2010/utahfs/cmd/internal/config"
+	"code.cfops.it/~brendan/utahfs/cmd/internal/config"
 )
 
 func main() {

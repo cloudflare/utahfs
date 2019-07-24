@@ -10,7 +10,7 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/Bren2010/utahfs/persistent"
+	"code.cfops.it/~brendan/utahfs/persistent"
 )
 
 func init() {

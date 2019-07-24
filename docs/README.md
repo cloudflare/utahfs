@@ -44,7 +44,7 @@ After this, the next step is to actually run the UtahFS client. Install it, if
 you haven't already:
 
 ```
-$ go install github.com/Bren2010/utahfs/cmd/utahfs-client
+$ go install code.cfops.it/~brendan/utahfs/cmd/utahfs-client
 ```
 
 and run it with:
@@ -100,7 +100,7 @@ client and server that allows them to authenticate with each other.
 Install the server, if you haven't already:
 
 ```
-$ go install github.com/Bren2010/utahfs/cmd/utahfs-server
+$ go install code.cfops.it/~brendan/utahfs/cmd/utahfs-server
 ```
 
 and run it with:
@@ -131,7 +131,7 @@ Single-Device Setup for information about `password` and `archive`.
 Finally, install the UtahFS client, if you haven't already:
 
 ```
-$ go install github.com/Bren2010/utahfs/cmd/utahfs-client
+$ go install code.cfops.it/~brendan/utahfs/cmd/utahfs-client
 ```
 
 and run it with:

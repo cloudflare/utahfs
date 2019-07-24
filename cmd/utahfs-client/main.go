@@ -11,8 +11,8 @@ import (
 	"path"
 	"path/filepath"
 
-	"github.com/Bren2010/utahfs"
-	"github.com/Bren2010/utahfs/cmd/internal/config"
+	"code.cfops.it/~brendan/utahfs"
+	"code.cfops.it/~brendan/utahfs/cmd/internal/config"
 
 	"github.com/jacobsa/fuse"
 	"github.com/jacobsa/fuse/fuseutil"

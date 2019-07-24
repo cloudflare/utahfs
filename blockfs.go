@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/Bren2010/utahfs/persistent"
+	"code.cfops.it/~brendan/utahfs/persistent"
 )
 
 const nilPtr = ^uint64(0)
