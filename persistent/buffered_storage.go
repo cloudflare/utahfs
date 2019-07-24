@@ -51,6 +51,36 @@ func (bs *BufferedStorage) Get(ctx context.Context, key string) ([]byte, error) 
 	return bs.base.Get(ctx, key)
 }
 
+func (bs *BufferedStorage) GetMany(ctx context.Context, keys []string) (map[string][]byte, error) {
+	if bs.pending == nil {
+		return nil, fmt.Errorf("app: transaction not active")
+	}
+
+	out := make(map[string][]byte)
+	remaining := make([]string, 0)
+	for _, key := range keys {
+		if data, ok := bs.pending.Writes[key]; ok {
+			if data != nil {
+				out[key] = dup(data)
+			}
+			continue
+		}
+		remaining = append(remaining, key)
+	}
+
+	if len(remaining) > 0 {
+		data, err := bs.base.GetMany(ctx, remaining)
+		if err != nil {
+			return nil, err
+		}
+		for key, val := range data {
+			out[key] = val
+		}
+	}
+
+	return out, nil
+}
+
 func (bs *BufferedStorage) Set(ctx context.Context, key string, data []byte) error {
 	if bs.pending == nil {
 		return fmt.Errorf("app: transaction not active")

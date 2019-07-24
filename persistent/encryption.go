@@ -49,6 +49,27 @@ func (e *encryption) Get(ctx context.Context, ptr uint64) ([]byte, error) {
 	return e.aead.Open(nil, raw[:ns], raw[ns:], []byte(fmt.Sprintf("%x", ptr)))
 }
 
+func (e *encryption) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]byte, error) {
+	data, err := e.base.GetMany(ctx, ptrs)
+	if err != nil {
+		return nil, err
+	}
+
+	ns := e.aead.NonceSize()
+	out := make(map[uint64][]byte)
+	for ptr, raw := range data {
+		if len(raw) < ns {
+			return nil, fmt.Errorf("storage: ciphertext is too small")
+		}
+		val, err := e.aead.Open(nil, raw[:ns], raw[ns:], []byte(fmt.Sprintf("%x", ptr)))
+		if err != nil {
+			return nil, err
+		}
+		out[ptr] = val
+	}
+	return out, nil
+}
+
 func (e *encryption) Set(ctx context.Context, ptr uint64, data []byte) error {
 	nonce := make([]byte, e.aead.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {

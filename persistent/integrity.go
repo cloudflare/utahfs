@@ -312,6 +312,20 @@ func (i *integrity) createChecksumBlocks(ctx context.Context, prev, curr uint64)
 	return nil
 }
 
+func (i *integrity) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]byte, error) {
+	out := make(map[uint64][]byte)
+	for _, ptr := range ptrs {
+		val, err := i.Get(ctx, ptr)
+		if err == ErrObjectNotFound {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		out[ptr] = val
+	}
+	return out, nil
+}
+
 func (i *integrity) Set(ctx context.Context, ptr uint64, data []byte) error {
 	if ptr+1 > i.curr.Nodes {
 		if err := i.createChecksumBlocks(ctx, i.curr.Nodes, ptr+1); err != nil {

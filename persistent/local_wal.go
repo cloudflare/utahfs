@@ -429,6 +429,20 @@ func (lw *localWAL) Get(ctx context.Context, key string) ([]byte, error) {
 	return val, nil
 }
 
+func (lw *localWAL) GetMany(ctx context.Context, keys []string) (map[string][]byte, error) {
+	out := make(map[string][]byte)
+	for _, key := range keys {
+		val, err := lw.Get(ctx, key)
+		if err == ErrObjectNotFound {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		out[key] = val
+	}
+	return out, nil
+}
+
 func (lw *localWAL) Commit(ctx context.Context, writes map[string][]byte) error {
 	if len(writes) == 0 {
 		return nil

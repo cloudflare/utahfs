@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"math/big"
 	"net"
@@ -206,7 +205,7 @@ func NewRemoteClient(transportKey, serverUrl string) (ReliableStorage, error) {
 	return rc, nil
 }
 
-func (rc *remoteClient) get(ctx context.Context, loc string) ([]byte, error) {
+func (rc *remoteClient) get(ctx context.Context, loc string) (map[string][]byte, error) {
 	parsed, err := url.Parse(loc)
 	if err != nil {
 		return nil, err
@@ -222,13 +221,11 @@ func (rc *remoteClient) get(ctx context.Context, loc string) ([]byte, error) {
 	resp, err := rc.client.Do(req.WithContext(ctx))
 	if err != nil {
 		return nil, err
-	} else if resp.StatusCode == http.StatusNotFound {
-		return nil, ErrObjectNotFound
 	} else if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
 		return nil, fmt.Errorf("remote: unexpected response status: %v: %v", loc, resp.Status)
 	}
-	return ioutil.ReadAll(resp.Body)
+	return readMap(resp.Body)
 }
 
 func (rc *remoteClient) post(ctx context.Context, loc string, body io.Reader) error {
@@ -314,11 +311,27 @@ func (rc *remoteClient) Start(ctx context.Context) error {
 }
 
 func (rc *remoteClient) Get(ctx context.Context, key string) ([]byte, error) {
+	data, err := rc.GetMany(ctx, []string{key})
+	if err != nil {
+		return nil, err
+	}
+	val, ok := data[key]
+	if !ok {
+		return nil, ErrObjectNotFound
+	}
+	return val, nil
+}
+
+func (rc *remoteClient) GetMany(ctx context.Context, keys []string) (map[string][]byte, error) {
 	id := rc.getId()
 	if id == "" {
 		return nil, fmt.Errorf("remote: transaction not active")
 	}
-	return rc.get(ctx, "get?id="+id+"&key="+url.QueryEscape(key))
+	loc := "get?id=" + id
+	for _, key := range keys {
+		loc += "&key=" + url.QueryEscape(key)
+	}
+	return rc.get(ctx, loc)
 }
 
 func (rc *remoteClient) Commit(ctx context.Context, writes map[string][]byte) error {
@@ -446,17 +459,14 @@ func (rs *remoteServer) handleGet(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	data, err := rs.base.Get(req.Context(), req.Form.Get("key"))
-	if err == ErrObjectNotFound {
-		rw.WriteHeader(http.StatusNotFound)
-		return
-	} else if err != nil {
+	data, err := rs.base.GetMany(req.Context(), req.Form["key"])
+	if err != nil {
 		log.Println(err)
 		rw.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 	rw.WriteHeader(http.StatusOK)
-	if _, err := rw.Write(data); err != nil {
+	if err := writeMap(rw, data); err != nil {
 		log.Println(err)
 		return
 	}

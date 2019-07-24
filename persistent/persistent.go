@@ -36,6 +36,7 @@ type ReliableStorage interface {
 	Start(ctx context.Context) error
 
 	Get(ctx context.Context, key string) (data []byte, err error)
+	GetMany(ctx context.Context, keys []string) (data map[string][]byte, err error)
 
 	// Commit persists the changes in `writes` to the backend, atomically. If
 	// the value of a key is nil, then that key is deleted.
@@ -48,6 +49,7 @@ type BlockStorage interface {
 	Start(ctx context.Context) error
 
 	Get(ctx context.Context, ptr uint64) (data []byte, err error)
+	GetMany(ctx context.Context, ptr []uint64) (data map[uint64][]byte, err error)
 	Set(ctx context.Context, ptr uint64, data []byte) (err error)
 
 	Commit(ctx context.Context) error

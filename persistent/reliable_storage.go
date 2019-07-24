@@ -23,6 +23,20 @@ func (sr *simpleReliable) Get(ctx context.Context, key string) ([]byte, error) {
 	return sr.base.Get(ctx, key)
 }
 
+func (sr *simpleReliable) GetMany(ctx context.Context, keys []string) (map[string][]byte, error) {
+	out := make(map[string][]byte)
+	for _, key := range keys {
+		val, err := sr.Get(ctx, key)
+		if err == ErrObjectNotFound {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		out[key] = val
+	}
+	return out, nil
+}
+
 func (sr *simpleReliable) Commit(ctx context.Context, writes map[string][]byte) error {
 	for key, val := range writes {
 		if err := sr.base.Set(ctx, key, val); err != nil {
@@ -60,6 +74,32 @@ func (c *cache) Get(ctx context.Context, key string) ([]byte, error) {
 	}
 	c.cache.Add(key, dup(data))
 	return data, nil
+}
+
+func (c *cache) GetMany(ctx context.Context, keys []string) (map[string][]byte, error) {
+	out := make(map[string][]byte)
+	remaining := make([]string, 0)
+	for _, key := range keys {
+		val, ok := c.cache.Get(key)
+		if ok {
+			out[key] = dup(val.([]byte))
+			continue
+		}
+		remaining = append(remaining, key)
+	}
+
+	if len(remaining) > 0 {
+		data, err := c.base.GetMany(ctx, remaining)
+		if err != nil {
+			return nil, err
+		}
+		for key, val := range data {
+			out[key] = val
+			c.cache.Add(key, dup(val))
+		}
+	}
+
+	return out, nil
 }
 
 func (c *cache) skip(key string, data []byte) bool {
