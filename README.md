@@ -17,8 +17,8 @@ Features
    uses *Object Storage*, which is cheap and commodified. Example providers
    include: AWS S3, Backblaze B2, and Wasabi.
 2. **Very Very Strong Encryption.** The method of encryption hides the number of
-   files, file names, file contents, individual file size, and prevents targeted
-   modifications including rollbacks. The only information which is clearly
+   files, file names, file contents, individual file size, and prevents any
+   modifications (including rollbacks!). The only information which is clearly
    leaked is the maximum archive size: archives grow to fit new data, but won't
    shrink if that data is deleted. Instead, that space is left allocated and
    will be re-used if needed in the future.
@@ -26,12 +26,12 @@ Features
    user has server-like hardware on their LAN (Rasberry Pi / Intel NUC), this
    can be used to coordinate multiple users operating in the same archive. It
    can also dramatically improve the performance of uploads, because a user can
-   upload large amounts already-encrypted data to the server over the fast
-   local network, and let the server take over the much slower upload the the
+   upload large amounts of already-encrypted data to the server over the fast
+   local network, and let the server take over the much slower upload to the
    cloud provider.
-4. **Archive Mode.** The client can be configured to guard reject deleting or
+4. **Archive Mode.** The client can be configured to guard against deleting or
    overwriting existing files, while still allowing new files to be created and
-   old files to be moved around. This can help protect against accidental data
+   old files to be moved around. This helps protect against accidental data
    loss.
 
 
@@ -47,8 +47,8 @@ Future Work
 1. **Oblivious RAM (ORAM).**  ORAM would be used, along with local hardware, to
    hide the access pattern of data from the cloud storage provider as well, so
    the provider only sees the *amount* data is accessed. *(Access pattern: Which
-   pieces of data are being accessed, and whether they were read from / written
-   to.)*
+   pieces of data are being accessed, and whether the access was a read or
+   write.)*
 2. **Reliability strategies for the WAL.** Changes are buffered in a local
    Write-Ahead Log (WAL) before being sent to the cloud storage provider. If the
    disk that the WAL is stored on fails, it could become very difficult to
