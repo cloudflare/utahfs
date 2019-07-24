@@ -78,8 +78,9 @@ type Client struct {
 	DataDir string `yaml:"data-dir"` // Directory where the WAL and pin file should be kept. Default: .utahfs
 
 	StorageProvider *StorageProvider `yaml:"storage-provider"`
-	MaxWALSize      int              `yaml:"max-wal-size"` // Max number of blocks to put in WAL before blocking on remote storage. Default: 128*1024 blocks
-	CacheSize       int              `yaml:"cache-size"`   // Size of in-memory LRU cache. Default: 32*1024 blocks, -1 to disable.
+	MaxWALSize      int              `yaml:"max-wal-size"`    // Max number of blocks to put in WAL before blocking on remote storage. Default: 128*1024 blocks
+	DiskCacheSize   int              `yaml:"disk-cache-size"` // Size of on-disk LRU cache. Default: 3200*1024 blocks, -1 to disable.
+	MemCacheSize    int              `yaml:"mem-cache-size"`  // Size of in-memory LRU cache. Default: 32*1024 blocks, -1 to disable.
 
 	RemoteServer *RemoteServer `yaml:"remote-server"`
 
@@ -110,6 +111,17 @@ func (c *Client) localStorage() (persistent.ReliableStorage, error) {
 		return nil, err
 	}
 
+	// Setup on-disk caching if desired.
+	if s.DiskCacheSize == 0 {
+		s.DiskCacheSize = 3200 * 1024
+	}
+	if s.DiskCacheSize != -1 {
+		store, err = persistent.NewDiskCache(store, path.Join(s.DataDir, "cache"), s.DiskCacheSize)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	// Setup a local WAL.
 	if c.MaxWALSize == 0 {
 		c.MaxWALSize = 128 * 1024
@@ -120,11 +132,11 @@ func (c *Client) localStorage() (persistent.ReliableStorage, error) {
 	}
 
 	// Setup caching if desired.
-	if c.CacheSize == 0 {
-		c.CacheSize = 32 * 1024
+	if c.MemCacheSize == 0 {
+		c.MemCacheSize = 32 * 1024
 	}
-	if c.CacheSize != -1 {
-		relStore, err = persistent.NewCache(relStore, c.CacheSize)
+	if c.MemCacheSize != -1 {
+		relStore, err = persistent.NewCache(relStore, c.MemCacheSize)
 		if err != nil {
 			return nil, err
 		}
