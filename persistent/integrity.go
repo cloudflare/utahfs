@@ -228,20 +228,22 @@ func (i *integrity) Get(ctx context.Context, ptr uint64) ([]byte, error) {
 	if ptr >= i.curr.Nodes {
 		return nil, ErrObjectNotFound
 	}
-	data, err := i.base.Get(ctx, dataPtr(ptr))
-	if err == ErrObjectNotFound {
-		data = nil
-	} else if err != nil {
+	ptrs := []uint64{dataPtr(ptr)}
+	checks := checksumBlocks(ptr, i.curr.Nodes)
+	for level, check := range checks {
+		ptrs = append(ptrs, checksumPtr(level, check[0]))
+	}
+
+	data, err := i.base.GetMany(ctx, ptrs)
+	if err != nil {
 		return nil, err
 	}
-	expected := leafHash(data)
 
-	for level, check := range checksumBlocks(ptr, i.curr.Nodes) {
-		block, err := i.base.Get(ctx, checksumPtr(level, check[0]))
-		if err == ErrObjectNotFound {
+	expected := leafHash(data[ptrs[0]])
+	for level, check := range checks {
+		block, ok := data[ptrs[level+1]]
+		if !ok {
 			return nil, fmt.Errorf("integrity: missing checksum block")
-		} else if err != nil {
-			return nil, err
 		} else if len(block) != 8*32 {
 			return nil, fmt.Errorf("integrity: checksum block is malformed")
 		} else if !bytes.Equal(expected[:], block[32*check[1]:32*check[1]+32]) {
@@ -255,7 +257,7 @@ func (i *integrity) Get(ctx context.Context, ptr uint64) ([]byte, error) {
 	} else if data == nil {
 		return nil, ErrObjectNotFound
 	}
-	return data, nil
+	return data[ptrs[0]], nil
 }
 
 func (i *integrity) createChecksumBlocks(ctx context.Context, prev, curr uint64) error {
@@ -335,14 +337,23 @@ func (i *integrity) Set(ctx context.Context, ptr uint64, data []byte) error {
 	if err := i.base.Set(ctx, dataPtr(ptr), data); err != nil {
 		return err
 	}
-	prev, expected := [32]byte{}, leafHash(data)
 
-	for level, check := range checksumBlocks(ptr, i.curr.Nodes) {
-		block, err := i.base.Get(ctx, checksumPtr(level, check[0]))
-		if err == ErrObjectNotFound {
+	ptrs := make([]uint64, 0)
+	checks := checksumBlocks(ptr, i.curr.Nodes)
+	for level, check := range checks {
+		ptrs = append(ptrs, checksumPtr(level, check[0]))
+	}
+
+	nodes, err := i.base.GetMany(ctx, ptrs)
+	if err != nil {
+		return err
+	}
+
+	prev, expected := [32]byte{}, leafHash(data)
+	for level, check := range checks {
+		block, ok := nodes[ptrs[level]]
+		if !ok {
 			return fmt.Errorf("integrity: missing checksum block")
-		} else if err != nil {
-			return err
 		} else if len(block) != 8*32 {
 			return fmt.Errorf("integrity: checksum block is malformed")
 		} else if level > 0 && !bytes.Equal(prev[:], block[32*check[1]:32*check[1]+32]) {
@@ -351,7 +362,7 @@ func (i *integrity) Set(ctx context.Context, ptr uint64, data []byte) error {
 		prev = intermediateHash(block)
 
 		copy(block[32*check[1]:], expected[:])
-		if err := i.base.Set(ctx, checksumPtr(level, check[0]), block); err != nil {
+		if err := i.base.Set(ctx, ptrs[level], block); err != nil {
 			return err
 		}
 		expected = intermediateHash(block)
