@@ -78,7 +78,7 @@ type Client struct {
 	DataDir string `yaml:"data-dir"` // Directory where the WAL and pin file should be kept. Default: .utahfs
 
 	StorageProvider *StorageProvider `yaml:"storage-provider"`
-	MaxWALSize      int              `yaml:"max-wal-size"` // Max number of blocks to put in WAL before blocking on remote storage. Default: 64*512 blocks
+	MaxWALSize      int              `yaml:"max-wal-size"` // Max number of blocks to put in WAL before blocking on remote storage. Default: 128*1024 blocks
 	CacheSize       int              `yaml:"cache-size"`   // Size of in-memory LRU cache. Default: 32*1024 blocks, -1 to disable.
 
 	RemoteServer *RemoteServer `yaml:"remote-server"`
@@ -112,7 +112,7 @@ func (c *Client) localStorage() (persistent.ReliableStorage, error) {
 
 	// Setup a local WAL.
 	if c.MaxWALSize == 0 {
-		c.MaxWALSize = 64 * 512
+		c.MaxWALSize = 128 * 1024
 	}
 	relStore, err := persistent.NewLocalWAL(store, path.Join(c.DataDir, "wal"), c.MaxWALSize)
 	if err != nil {
