@@ -112,11 +112,11 @@ func (c *Client) localStorage() (persistent.ReliableStorage, error) {
 	}
 
 	// Setup on-disk caching if desired.
-	if s.DiskCacheSize == 0 {
-		s.DiskCacheSize = 3200 * 1024
+	if c.DiskCacheSize == 0 {
+		c.DiskCacheSize = 3200 * 1024
 	}
-	if s.DiskCacheSize != -1 {
-		store, err = persistent.NewDiskCache(store, path.Join(s.DataDir, "cache"), s.DiskCacheSize)
+	if c.DiskCacheSize != -1 {
+		store, err = persistent.NewDiskCache(store, path.Join(c.DataDir, "cache"), c.DiskCacheSize)
 		if err != nil {
 			return nil, err
 		}
@@ -150,8 +150,10 @@ func (c *Client) remoteStorage() (persistent.ReliableStorage, error) {
 		return nil, fmt.Errorf("cannot set storage-provider with remote-server")
 	} else if c.MaxWALSize != 0 {
 		return nil, fmt.Errorf("cannot set max-wal-size with remote-server")
-	} else if c.CacheSize != 0 {
-		return nil, fmt.Errorf("cannot set cache-size along with remote-server")
+	} else if c.DiskCacheSize != 0 {
+		return nil, fmt.Errorf("cannot set disk-cache-size along with remote-server")
+	} else if c.MemCacheSize != 0 {
+		return nil, fmt.Errorf("cannot set mem-cache-size along with remote-server")
 	} else if c.RemoteServer.TransportKey == "" {
 		return nil, fmt.Errorf("no transport key was given for remote server")
 	} else if c.RemoteServer.TransportKey == c.Password {
