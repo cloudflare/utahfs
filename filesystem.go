@@ -3,6 +3,7 @@ package utahfs
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/user"
@@ -458,9 +459,15 @@ func (fs *filesystem) ReadFile(ctx context.Context, op *fuseops.ReadFileOp) erro
 		return fuse.EINVAL
 	}
 
-	n, err := nd.ReadAt(op.Dst, op.Offset)
-	if err != nil {
-		return err
+	n := 0
+	for n < len(op.Dst) {
+		m, err := nd.ReadAt(op.Dst[n:], op.Offset+int64(n))
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			return err
+		}
+		n += m
 	}
 	op.BytesRead = n
 
