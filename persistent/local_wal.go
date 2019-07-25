@@ -473,6 +473,8 @@ func (lw *localWAL) Commit(ctx context.Context, writes map[string][]byte) error 
 			return err
 		} else if _, err := lw.fh.Write(emptyTx); err != nil { // Write an empty transaction to mark the end of queue1.
 			return err
+		} else if err := lw.fh.Sync(); err != nil {
+			return err
 		}
 
 		lw.endQueue1 = endPos
@@ -482,6 +484,8 @@ func (lw *localWAL) Commit(ctx context.Context, writes map[string][]byte) error 
 		if pos, err = lw.fh.Seek(0, io.SeekEnd); err != nil {
 			return err
 		} else if _, err := buff.WriteTo(lw.fh); err != nil {
+			return err
+		} else if err := lw.fh.Sync(); err != nil {
 			return err
 		}
 	}
