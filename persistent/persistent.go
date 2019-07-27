@@ -5,6 +5,7 @@ package persistent
 import (
 	"context"
 	"errors"
+	"sync"
 )
 
 const nilPtr = ^uint64(0)
@@ -63,4 +64,39 @@ func dup(in []byte) []byte {
 	out := make([]byte, len(in))
 	copy(out, in)
 	return out
+}
+
+// MapMutex implements the ability to lock and unlock specific keys of a map.
+type MapMutex struct {
+	m *sync.Map
+}
+
+func NewMapMutex() MapMutex {
+	return MapMutex{m: &sync.Map{}}
+}
+
+func (mm MapMutex) Lock(key interface{}) {
+	for {
+		mu := &sync.Mutex{}
+		mu.Lock()
+
+		temp, _ := mm.m.LoadOrStore(key, mu)
+		cand := temp.(*sync.Mutex)
+		if cand == mu {
+			return
+		}
+
+		cand.Lock() // Block until the key is unlocked and then try again.
+		cand.Unlock()
+	}
+}
+
+func (mm MapMutex) Unlock(key interface{}) {
+	temp, ok := mm.m.Load(key)
+	if !ok {
+		panic("kmutex: unlock of unlocked mutex")
+	}
+	mu := temp.(*sync.Mutex)
+	mm.m.Delete(key)
+	mu.Unlock()
 }

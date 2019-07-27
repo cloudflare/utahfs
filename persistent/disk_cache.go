@@ -90,7 +90,8 @@ func (kh *keysHeap) remove(key string) {
 }
 
 type diskCache struct {
-	mu sync.Mutex
+	mu    sync.Mutex
+	mapMu MapMutex
 
 	base ObjectStorage
 	size int
@@ -140,6 +141,8 @@ func NewDiskCache(base ObjectStorage, loc string, size int) (ObjectStorage, erro
 
 	DiskCacheSize.WithLabelValues(loc).Set(float64(kh.Len()))
 	return &diskCache{
+		mapMu: NewMapMutex(),
+
 		base: base,
 		size: size,
 		loc:  loc,
@@ -156,6 +159,9 @@ func (dc *diskCache) addToCache(key string, data []byte) {
 		log.Println(err)
 		return
 	}
+	dc.mu.Lock()
+	defer dc.mu.Unlock()
+
 	dc.keys.bump(key)
 
 	// Evict from the cache until we're back at/below the target size.
@@ -170,7 +176,9 @@ func (dc *diskCache) addToCache(key string, data []byte) {
 }
 
 func (dc *diskCache) removeFromCache(key string) {
+	dc.mu.Lock()
 	dc.keys.remove(key)
+	dc.mu.Unlock()
 	if _, err := dc.db.Exec("DELETE FROM cache WHERE key = ?", key); err != nil {
 		log.Println(err)
 	}
@@ -178,8 +186,8 @@ func (dc *diskCache) removeFromCache(key string) {
 }
 
 func (dc *diskCache) Get(ctx context.Context, key string) ([]byte, error) {
-	dc.mu.Lock()
-	defer dc.mu.Unlock()
+	dc.mapMu.Lock(key)
+	defer dc.mapMu.Unlock(key)
 
 	var data []byte
 	err := dc.db.QueryRow("SELECT val FROM cache WHERE key = ?", key).Scan(&data)
@@ -193,13 +201,15 @@ func (dc *diskCache) Get(ctx context.Context, key string) ([]byte, error) {
 	} else if err != nil {
 		return nil, err
 	}
+	dc.mu.Lock()
 	dc.keys.bump(key)
+	dc.mu.Unlock()
 	return data, nil
 }
 
 func (dc *diskCache) Set(ctx context.Context, key string, data []byte) error {
-	dc.mu.Lock()
-	defer dc.mu.Unlock()
+	dc.mapMu.Lock(key)
+	defer dc.mapMu.Unlock(key)
 
 	if err := dc.base.Set(ctx, key, data); err != nil {
 		dc.removeFromCache(key)
@@ -210,9 +220,10 @@ func (dc *diskCache) Set(ctx context.Context, key string, data []byte) error {
 }
 
 func (dc *diskCache) Delete(ctx context.Context, key string) error {
-	dc.mu.Lock()
-	defer dc.mu.Unlock()
+	dc.mapMu.Lock(key)
+	defer dc.mapMu.Unlock(key)
 
+	err := dc.base.Delete(ctx, key)
 	dc.removeFromCache(key)
-	return dc.base.Delete(ctx, key)
+	return err
 }
