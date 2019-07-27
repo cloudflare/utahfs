@@ -11,6 +11,16 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
+
+var DiskCacheSize = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "disk_cache_size",
+		Help: "The number of entries in the on-disk cache.",
+	},
+	[]string{"path"},
 )
 
 type keysHeap struct {
@@ -84,6 +94,7 @@ type diskCache struct {
 
 	base ObjectStorage
 	size int
+	loc  string
 
 	keys *keysHeap
 	db   *sql.DB
@@ -127,9 +138,11 @@ func NewDiskCache(base ObjectStorage, loc string, size int) (ObjectStorage, erro
 
 	heap.Init(kh)
 
+	DiskCacheSize.WithLabelValues(loc).Set(float64(kh.Len()))
 	return &diskCache{
 		base: base,
 		size: size,
+		loc:  loc,
 
 		keys: kh,
 		db:   db,
@@ -153,6 +166,7 @@ func (dc *diskCache) addToCache(key string, data []byte) {
 			return
 		}
 	}
+	DiskCacheSize.WithLabelValues(dc.loc).Set(float64(dc.keys.Len()))
 }
 
 func (dc *diskCache) removeFromCache(key string) {
@@ -160,6 +174,7 @@ func (dc *diskCache) removeFromCache(key string) {
 	if _, err := dc.db.Exec("DELETE FROM cache WHERE key = ?", key); err != nil {
 		log.Println(err)
 	}
+	DiskCacheSize.WithLabelValues(dc.loc).Dec()
 }
 
 func (dc *diskCache) Get(ctx context.Context, key string) ([]byte, error) {

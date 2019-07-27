@@ -15,6 +15,7 @@ import (
 func init() {
 	prometheus.MustRegister(persistent.AppStorageCommits)
 	prometheus.MustRegister(persistent.LocalWALSize)
+	prometheus.MustRegister(persistent.DiskCacheSize)
 }
 
 // metrics registers metrics with Prometheus and starts the server.
