@@ -16,6 +16,8 @@ func init() {
 	prometheus.MustRegister(persistent.AppStorageCommits)
 	prometheus.MustRegister(persistent.LocalWALSize)
 	prometheus.MustRegister(persistent.DiskCacheSize)
+	prometheus.MustRegister(persistent.B2Ops)
+	prometheus.MustRegister(persistent.S3Ops)
 }
 
 // metrics registers metrics with Prometheus and starts the server.

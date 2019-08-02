@@ -10,6 +10,15 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/prometheus/client_golang/prometheus"
+)
+
+var S3Ops = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "s3_ops",
+		Help: "The number of operations against an S3 backend.",
+	},
+	[]string{"operation", "success"},
 )
 
 type s3Client struct {
@@ -37,11 +46,19 @@ func (s *s3Client) Get(ctx context.Context, key string) ([]byte, error) {
 		Key:    aws.String(key),
 	})
 	if aerr, ok := err.(awserr.Error); ok && aerr.Code() == s3.ErrCodeNoSuchKey {
+		S3Ops.WithLabelValues("get", "true").Inc()
 		return nil, ErrObjectNotFound
 	} else if err != nil {
+		S3Ops.WithLabelValues("get", "false").Inc()
 		return nil, err
 	}
-	return ioutil.ReadAll(res.Body)
+	data, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		S3Ops.WithLabelValues("get", "false").Inc()
+		return nil, err
+	}
+	S3Ops.WithLabelValues("get", "true").Inc()
+	return data, nil
 }
 
 func (s *s3Client) Set(ctx context.Context, key string, data []byte) error {
@@ -50,7 +67,13 @@ func (s *s3Client) Set(ctx context.Context, key string, data []byte) error {
 		Key:    aws.String(key),
 		Body:   bytes.NewReader(data),
 	})
-	return err
+	if err != nil {
+		S3Ops.WithLabelValues("set", "false").Inc()
+		return err
+	}
+
+	S3Ops.WithLabelValues("set", "true").Inc()
+	return nil
 }
 
 func (s *s3Client) Delete(ctx context.Context, key string) error {
@@ -58,5 +81,11 @@ func (s *s3Client) Delete(ctx context.Context, key string) error {
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
 	})
-	return err
+	if err != nil {
+		S3Ops.WithLabelValues("delete", "false").Inc()
+		return err
+	}
+
+	S3Ops.WithLabelValues("delete", "true").Inc()
+	return nil
 }
