@@ -79,6 +79,7 @@ type Client struct {
 
 	StorageProvider *StorageProvider `yaml:"storage-provider"`
 	MaxWALSize      int              `yaml:"max-wal-size"`    // Max number of blocks to put in WAL before blocking on remote storage. Default: 128*1024 blocks
+	WALParallelism  int              `yaml:"wal-parallelism"` // Number of threads to use when draining the WAL. Default: 1
 	DiskCacheSize   int              `yaml:"disk-cache-size"` // Size of on-disk LRU cache. Default: 3200*1024 blocks, -1 to disable.
 	MemCacheSize    int              `yaml:"mem-cache-size"`  // Size of in-memory LRU cache. Default: 32*1024 blocks, -1 to disable.
 
@@ -126,7 +127,10 @@ func (c *Client) localStorage() (persistent.ReliableStorage, error) {
 	if c.MaxWALSize == 0 {
 		c.MaxWALSize = 128 * 1024
 	}
-	relStore, err := persistent.NewLocalWAL(store, path.Join(c.DataDir, "wal"), c.MaxWALSize)
+	if c.WALParallelism == 0 {
+		c.WALParallelism = 1
+	}
+	relStore, err := persistent.NewLocalWAL(store, path.Join(c.DataDir, "wal"), c.MaxWALSize, c.WALParallelism)
 	if err != nil {
 		return nil, err
 	}
@@ -229,9 +233,10 @@ type Server struct {
 
 	StorageProvider *StorageProvider `yaml:"storage-provider"`
 
-	MaxWALSize    int `yaml:"max-wal-size"`    // Max number of blocks to put in WAL before blocking on remote storage. Default: 320*1024 blocks
-	DiskCacheSize int `yaml:"disk-cache-size"` // Size of on-disk LRU cache. Default: 3200*1024 blocks, -1 to disable.
-	MemCacheSize  int `yaml:"mem-cache-size"`  // Size of in-memory LRU cache. Default: 32*1024 blocks, -1 to disable.
+	MaxWALSize     int `yaml:"max-wal-size"`    // Max number of blocks to put in WAL before blocking on remote storage. Default: 320*1024 blocks
+	WALParallelism int `yaml:"wal-parallelism"` // Number of threads to use when draining the WAL. Default: 1
+	DiskCacheSize  int `yaml:"disk-cache-size"` // Size of on-disk LRU cache. Default: 3200*1024 blocks, -1 to disable.
+	MemCacheSize   int `yaml:"mem-cache-size"`  // Size of in-memory LRU cache. Default: 32*1024 blocks, -1 to disable.
 
 	TransportKey string `yaml:"transport-key"` // Pre-shared key for authenticating client and server.
 }
@@ -274,7 +279,10 @@ func (s *Server) Server() (*http.Server, error) {
 	if s.MaxWALSize == 0 {
 		s.MaxWALSize = 32 * 1024
 	}
-	relStore, err := persistent.NewLocalWAL(store, path.Join(s.DataDir, "wal"), s.MaxWALSize)
+	if s.WALParallelism == 0 {
+		s.WALParallelism = 1
+	}
+	relStore, err := persistent.NewLocalWAL(store, path.Join(s.DataDir, "wal"), s.MaxWALSize, s.WALParallelism)
 	if err != nil {
 		return nil, err
 	}

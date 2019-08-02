@@ -30,9 +30,10 @@ type localWAL struct {
 	base  ObjectStorage
 	local *sql.DB
 
-	loc     string
-	maxSize int
-	wake    chan struct{}
+	loc         string
+	maxSize     int
+	parallelism int
+	wake        chan struct{}
 
 	currSize  int
 	lastCount time.Time
@@ -44,7 +45,7 @@ type localWAL struct {
 //
 // The WAL may have at least `maxSize` buffered entries before new writes start
 // blocking on old writes being flushed.
-func NewLocalWAL(base ObjectStorage, loc string, maxSize int) (ReliableStorage, error) {
+func NewLocalWAL(base ObjectStorage, loc string, maxSize, parallelism int) (ReliableStorage, error) {
 	if err := os.MkdirAll(path.Dir(loc), 0744); err != nil {
 		return nil, err
 	}
@@ -60,9 +61,10 @@ func NewLocalWAL(base ObjectStorage, loc string, maxSize int) (ReliableStorage, 
 		base:  base,
 		local: local,
 
-		loc:     loc,
-		maxSize: maxSize,
-		wake:    make(chan struct{}),
+		loc:         loc,
+		maxSize:     maxSize,
+		parallelism: parallelism,
+		wake:        make(chan struct{}),
 
 		currSize:  0,
 		lastCount: time.Time{},
@@ -93,7 +95,36 @@ func (lw *localWAL) drain() {
 	}
 }
 
+type walReq struct {
+	key string
+	val []byte
+}
+
 func (lw *localWAL) drainOnce() error {
+	reqs := make(chan walReq, 100)
+	errs := make(chan error, 100)
+	defer close(reqs)
+
+	for i := 0; i < lw.parallelism; i++ {
+		go func() {
+			for {
+				req, ok := <-reqs
+				if !ok {
+					return
+				}
+
+				var err error
+				if len(req.val) > 0 {
+					err = lw.base.Set(context.Background(), req.key, req.val)
+				} else {
+					err = lw.base.Delete(context.Background(), req.key)
+				}
+
+				errs <- err
+			}
+		}()
+	}
+
 	for {
 		var (
 			ids  []string
@@ -131,16 +162,15 @@ func (lw *localWAL) drainOnce() error {
 		// Write entries read from the WAL to the underlying storage. This is
 		// done outside of the database query to prevent blocking other threads.
 		for i, _ := range ids {
-			key, val := keys[i], vals[i]
-			if len(val) > 0 {
-				if err := lw.base.Set(context.Background(), key, val); err != nil {
-					return err
-				}
-			} else {
-				if err := lw.base.Delete(context.Background(), key); err != nil {
-					return err
-				}
+			reqs <- walReq{keys[i], vals[i]}
+		}
+		for range ids {
+			if subErr := <-errs; subErr != nil {
+				err = subErr
 			}
+		}
+		if err != nil {
+			return err
 		}
 
 		_, err = lw.local.Exec("DELETE FROM wal WHERE id in (" + strings.Join(ids, ",") + ")")
