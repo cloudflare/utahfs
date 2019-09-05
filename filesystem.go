@@ -27,6 +27,12 @@ import (
 // If there's an error path that could cause the function to return before
 // getting to commit(), then the function must manually forget the node.
 
+type dirHandle struct {
+	inode    fuseops.InodeID
+	entries  []fuseutil.Dirent
+	children map[string]fuseops.ChildInodeEntry
+}
+
 func now() time.Time {
 	return time.Now().Round(time.Second)
 }
@@ -76,7 +82,7 @@ type filesystem struct {
 	rootPtr uint64
 
 	nextHandleID fuseops.HandleID
-	dirHandles   map[fuseops.HandleID][]fuseutil.Dirent
+	dirHandles   map[fuseops.HandleID]dirHandle
 	fileHandles  map[fuseops.HandleID]struct{}
 
 	mu sync.Mutex
@@ -117,7 +123,7 @@ func NewFilesystem(bfs *BlockFilesystem) (fuseutil.FileSystem, error) {
 		nm:      nm,
 		rootPtr: state.RootPtr,
 
-		dirHandles:  make(map[fuseops.HandleID][]fuseutil.Dirent),
+		dirHandles:  make(map[fuseops.HandleID]dirHandle),
 		fileHandles: make(map[fuseops.HandleID]struct{}),
 	}, nil
 }
@@ -138,6 +144,28 @@ func (fs *filesystem) StatFS(ctx context.Context, op *fuseops.StatFSOp) error {
 }
 
 func (fs *filesystem) LookUpInode(ctx context.Context, op *fuseops.LookUpInodeOp) error {
+	// When the filesystem is reading a directory, it issues LookUpInode ops for
+	// every entry it reads. Since we already looked up every node when we were
+	// first opening the directory, looking them all up again would be wasteful.
+	// Try to answer the query by getting this data from the open handle.
+	fs.mu.Lock()
+	for _, handle := range fs.dirHandles {
+		if handle.inode != op.Parent {
+			continue
+		}
+		child, ok := handle.children[op.Name]
+		if !ok {
+			fs.mu.Unlock()
+			return fuse.ENOENT
+		}
+		op.Entry = child
+		fs.mu.Unlock()
+		return nil
+	}
+	fs.mu.Unlock()
+
+	// That failed. Answer the query normally: by starting a transaction and
+	// getting the data we need from the backend.
 	defer fs.synchronize(ctx)()
 
 	nd, err := fs.nm.Open(ctx, fs.ptr(op.Parent))
@@ -158,11 +186,24 @@ func (fs *filesystem) LookUpInode(ctx context.Context, op *fuseops.LookUpInodeOp
 	op.Entry.Child = childID
 	op.Entry.Attributes = child.Attrs
 	op.Entry.AttributesExpiration = fs.expiration()
+	op.Entry.EntryExpiration = fs.expiration()
 
 	return nil
 }
 
 func (fs *filesystem) GetInodeAttributes(ctx context.Context, op *fuseops.GetInodeAttributesOp) error {
+	fs.mu.Lock()
+	for _, handle := range fs.dirHandles {
+		for _, nd := range handle.children {
+			if nd.Child == op.Inode {
+				op.Attributes = nd.Attributes
+				op.AttributesExpiration = fs.expiration()
+				fs.mu.Unlock()
+				return nil
+			}
+		}
+	}
+	fs.mu.Unlock()
 	defer fs.synchronize(ctx)()
 
 	nd, err := fs.nm.Open(ctx, fs.ptr(op.Inode))
@@ -227,6 +268,7 @@ func (fs *filesystem) MkDir(ctx context.Context, op *fuseops.MkDirOp) error {
 	op.Entry.Child = parent.Children[op.Name]
 	op.Entry.Attributes = child.Attrs
 	op.Entry.AttributesExpiration = fs.expiration()
+	op.Entry.EntryExpiration = fs.expiration()
 
 	return commit(ctx, fs.nm, parent)
 }
@@ -241,6 +283,7 @@ func (fs *filesystem) MkNode(ctx context.Context, op *fuseops.MkNodeOp) error {
 	op.Entry.Child = parent.Children[op.Name]
 	op.Entry.Attributes = child.Attrs
 	op.Entry.AttributesExpiration = fs.expiration()
+	op.Entry.EntryExpiration = fs.expiration()
 
 	return commit(ctx, fs.nm, parent)
 }
@@ -255,6 +298,7 @@ func (fs *filesystem) CreateFile(ctx context.Context, op *fuseops.CreateFileOp) 
 	op.Entry.Child = parent.Children[op.Name]
 	op.Entry.Attributes = child.Attrs
 	op.Entry.AttributesExpiration = fs.expiration()
+	op.Entry.EntryExpiration = fs.expiration()
 
 	// Issue the next handle ID. It doesn't mean anything.
 	handleID := fs.nextHandleID
@@ -280,6 +324,7 @@ func (fs *filesystem) CreateSymlink(ctx context.Context, op *fuseops.CreateSymli
 	op.Entry.Child = parent.Children[op.Name]
 	op.Entry.Attributes = child.Attrs
 	op.Entry.AttributesExpiration = fs.expiration()
+	op.Entry.EntryExpiration = fs.expiration()
 
 	return commit(ctx, fs.nm, parent, child)
 }
@@ -371,13 +416,19 @@ func (fs *filesystem) OpenDir(ctx context.Context, op *fuseops.OpenDirOp) error 
 	}
 	sort.Strings(names)
 
+	children := make(map[string]fuseops.ChildInodeEntry)
 	entries := make([]fuseutil.Dirent, 0, len(nd.Children))
 	for i, name := range names {
 		childID := nd.Children[name]
-
 		child, err := fs.nm.Open(ctx, fs.ptr(childID))
 		if err != nil {
 			return fmt.Errorf("failed to open inode for child")
+		}
+
+		children[name] = fuseops.ChildInodeEntry{
+			Child:                childID,
+			Attributes:           child.Attrs,
+			AttributesExpiration: fs.expiration(),
 		}
 		entries = append(entries, fuseutil.Dirent{
 			fuseops.DirOffset(i + 1), childID, name, child.Type(),
@@ -388,7 +439,11 @@ func (fs *filesystem) OpenDir(ctx context.Context, op *fuseops.OpenDirOp) error 
 	handleID := fs.nextHandleID
 	fs.nextHandleID++
 
-	fs.dirHandles[handleID] = entries
+	fs.dirHandles[handleID] = dirHandle{
+		inode:    op.Inode,
+		children: children,
+		entries:  entries,
+	}
 	op.Handle = handleID
 
 	return nil
@@ -397,17 +452,17 @@ func (fs *filesystem) OpenDir(ctx context.Context, op *fuseops.OpenDirOp) error 
 func (fs *filesystem) ReadDir(ctx context.Context, op *fuseops.ReadDirOp) error {
 	defer fs.synchronize(ctx)()
 
-	entries, ok := fs.dirHandles[op.Handle]
+	handle, ok := fs.dirHandles[op.Handle]
 	if !ok {
 		return fmt.Errorf("failed to release unknown handle")
 	}
 	idx := int(op.Offset)
-	if idx > len(entries) {
+	if idx > len(handle.entries) {
 		return fuse.EINVAL
 	}
 
-	for i := idx; i < len(entries); i++ {
-		n := fuseutil.WriteDirent(op.Dst[op.BytesRead:], entries[i])
+	for i := idx; i < len(handle.entries); i++ {
+		n := fuseutil.WriteDirent(op.Dst[op.BytesRead:], handle.entries[i])
 		if n == 0 {
 			break
 		}
