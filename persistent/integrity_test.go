@@ -50,7 +50,7 @@ func TestIntegrity(t *testing.T) {
 		writtenPtrs = append(writtenPtrs, ptr)
 		written[ptr] = dup(data)
 
-		if err := appStore.Set(ctx, ptr, data); err != nil {
+		if err := appStore.Set(ctx, ptr, data, Content); err != nil {
 			t.Fatal(err)
 		}
 

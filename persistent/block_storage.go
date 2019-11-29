@@ -49,8 +49,8 @@ func (sb simpleBlock) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]
 	return out, nil
 }
 
-func (sb simpleBlock) Set(ctx context.Context, ptr uint64, data []byte) error {
-	return sb.base.Set(ctx, fmt.Sprintf("%x", ptr), data)
+func (sb simpleBlock) Set(ctx context.Context, ptr uint64, data []byte, dt DataType) error {
+	return sb.base.Set(ctx, fmt.Sprintf("%x", ptr), data, dt)
 }
 
 func (sb simpleBlock) Commit(ctx context.Context) error {
@@ -89,7 +89,7 @@ func (bm blockMemory) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]
 	return out, nil
 }
 
-func (bm blockMemory) Set(ctx context.Context, ptr uint64, data []byte) error {
+func (bm blockMemory) Set(ctx context.Context, ptr uint64, data []byte, _ DataType) error {
 	bm[ptr] = dup(data)
 	return nil
 }

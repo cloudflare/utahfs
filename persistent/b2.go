@@ -89,7 +89,7 @@ func (b *b2) Get(ctx context.Context, key string) ([]byte, error) {
 	return data, nil
 }
 
-func (b *b2) Set(ctx context.Context, key string, data []byte) error {
+func (b *b2) Set(ctx context.Context, key string, data []byte, _ DataType) error {
 	meta := make(map[string]string)
 	buff := bytes.NewBuffer(data)
 

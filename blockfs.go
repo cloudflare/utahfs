@@ -81,7 +81,7 @@ func (bfs *BlockFilesystem) allocate(ctx context.Context) (uint64, error) {
 
 // Create creates a new file. It returns the pointer to the file and an open
 // copy.
-func (bfs *BlockFilesystem) Create(ctx context.Context) (uint64, *BlockFile, error) {
+func (bfs *BlockFilesystem) Create(ctx context.Context, dt persistent.DataType) (uint64, *BlockFile, error) {
 	ptr, err := bfs.allocate(ctx)
 	if err != nil {
 		return nilPtr, nil, err
@@ -99,6 +99,7 @@ func (bfs *BlockFilesystem) Create(ctx context.Context) (uint64, *BlockFile, err
 
 		start: ptr,
 		size:  0,
+		dt:    dt,
 
 		pos:  0,
 		idx:  0,
@@ -113,13 +114,14 @@ func (bfs *BlockFilesystem) Create(ctx context.Context) (uint64, *BlockFile, err
 }
 
 // Open returns a handle to an existing file.
-func (bfs *BlockFilesystem) Open(ctx context.Context, ptr uint64) (*BlockFile, error) {
+func (bfs *BlockFilesystem) Open(ctx context.Context, ptr uint64, dt persistent.DataType) (*BlockFile, error) {
 	bf := &BlockFile{
 		parent: bfs,
 		ctx:    ctx,
 
 		start: ptr,
 		size:  0,
+		dt:    dt,
 	}
 	if err := bf.load(ptr, 0, false); err != nil {
 		return nil, err
@@ -131,7 +133,7 @@ func (bfs *BlockFilesystem) Open(ctx context.Context, ptr uint64) (*BlockFile, e
 // Unlink allows the blocks allocated for a file to be re-used for other
 // purposes.
 func (bfs *BlockFilesystem) Unlink(ctx context.Context, ptr uint64) error {
-	bf, err := bfs.Open(ctx, ptr)
+	bf, err := bfs.Open(ctx, ptr, persistent.Unknown)
 	if err != nil {
 		return err
 	}
@@ -179,6 +181,8 @@ type BlockFile struct {
 	start uint64
 	// size is the total size of the file, in bytes.
 	size int64
+	// dt is the type of data contained in this file
+	dt persistent.DataType
 
 	// pos is our current position in the file, in bytes.
 	pos int64
@@ -192,11 +196,11 @@ type BlockFile struct {
 
 // persist saves any changes to the current block to the storage backend.
 func (bf *BlockFile) persist() error {
-	err := bf.parent.store.Set(bf.ctx, p(bf.ptr), bf.curr.MarshalPtrs())
+	err := bf.parent.store.Set(bf.ctx, p(bf.ptr), bf.curr.MarshalPtrs(), persistent.Metadata)
 	if err != nil {
 		return err
 	} else if bf.curr.data != nil {
-		err := bf.parent.store.Set(bf.ctx, d(bf.ptr), bf.curr.MarshalData())
+		err := bf.parent.store.Set(bf.ctx, d(bf.ptr), bf.curr.MarshalData(), bf.dt)
 		if err != nil {
 			return err
 		}

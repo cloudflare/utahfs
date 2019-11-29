@@ -130,7 +130,7 @@ func TestBlockFilesystem(t *testing.T) {
 		dice := rand.Intn(10000)
 
 		if len(ptrs) == 0 || dice == 0 {
-			ptr, bf, err := bfs.Create(ctx)
+			ptr, bf, err := bfs.Create(ctx, persistent.Content)
 			if err != nil {
 				t.Fatal(err)
 			}

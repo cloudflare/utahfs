@@ -31,7 +31,7 @@ func (nd *node) open(create bool) error {
 		return nil
 	} else if nd.Data == nilPtr {
 		if create {
-			ptr, bf, err := nd.bfs.Create(nd.ctx)
+			ptr, bf, err := nd.bfs.Create(nd.ctx, persistent.Content)
 			if err != nil {
 				return err
 			}
@@ -41,7 +41,7 @@ func (nd *node) open(create bool) error {
 		return io.EOF
 	}
 
-	bf, err := nd.bfs.Open(nd.ctx, nd.Data)
+	bf, err := nd.bfs.Open(nd.ctx, nd.Data, persistent.Content)
 	if err != nil {
 		return err
 	}
@@ -224,7 +224,7 @@ func (nm *nodeManager) Create(ctx context.Context, mode os.FileMode) (uint64, er
 		nd.Children = make(map[string]fuseops.InodeID)
 	}
 
-	ptr, bf, err := nm.bfs.Create(ctx)
+	ptr, bf, err := nm.bfs.Create(ctx, persistent.Metadata)
 	if err != nil {
 		return nilPtr, err
 	} else if err := gob.NewEncoder(bf).Encode(nd); err != nil {
@@ -243,7 +243,7 @@ func (nm *nodeManager) Open(ctx context.Context, ptr uint64) (*node, error) {
 		return nd, nil
 	}
 
-	bf, err := nm.bfs.Open(ctx, ptr)
+	bf, err := nm.bfs.Open(ctx, ptr, persistent.Metadata)
 	if err != nil {
 		return nil, err
 	}

@@ -61,7 +61,7 @@ func (s *s3Client) Get(ctx context.Context, key string) ([]byte, error) {
 	return data, nil
 }
 
-func (s *s3Client) Set(ctx context.Context, key string, data []byte) error {
+func (s *s3Client) Set(ctx context.Context, key string, data []byte, _ DataType) error {
 	_, err := s.client.PutObject(&s3.PutObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),

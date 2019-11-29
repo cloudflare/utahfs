@@ -334,13 +334,20 @@ func (rc *remoteClient) GetMany(ctx context.Context, keys []string) (map[string]
 	return rc.get(ctx, loc)
 }
 
-func (rc *remoteClient) Commit(ctx context.Context, writes map[string][]byte) error {
+func (rc *remoteClient) Commit(ctx context.Context, writes map[string]WriteData) error {
 	id := rc.getId()
 	if id == "" {
 		return fmt.Errorf("remote: transaction not active")
 	}
+	data := make(map[string][]byte)
+	for key, wr := range writes {
+		if wr.Type < 0 || wr.Type > 255 {
+			return fmt.Errorf("remote: write type is out of bounds")
+		}
+		data[key] = append([]byte{byte(wr.Type)}, wr.Data...)
+	}
 	buff := &bytes.Buffer{}
-	if err := writeMap(buff, writes); err != nil {
+	if err := writeMap(buff, data); err != nil {
 		return err
 	}
 	err := rc.post(ctx, "commit?id="+id, buff)
@@ -484,12 +491,17 @@ func (rs *remoteServer) handleCommit(rw http.ResponseWriter, req *http.Request) 
 		rs.lastCheckIn = time.Time{}
 	}()
 
-	writes, err := readMap(req.Body)
+	data, err := readMap(req.Body)
 	if err != nil {
 		log.Println(err)
 		rw.WriteHeader(http.StatusBadRequest)
 		return
-	} else if err := rs.base.Commit(req.Context(), writes); err != nil {
+	}
+	writes := make(map[string]WriteData)
+	for key, val := range data {
+		writes[key] = WriteData{val[1:], DataType(val[0])}
+	}
+	if err := rs.base.Commit(req.Context(), writes); err != nil {
 		log.Println(err)
 		rw.WriteHeader(http.StatusInternalServerError)
 		return

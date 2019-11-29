@@ -37,9 +37,9 @@ func (sr *simpleReliable) GetMany(ctx context.Context, keys []string) (map[strin
 	return out, nil
 }
 
-func (sr *simpleReliable) Commit(ctx context.Context, writes map[string][]byte) error {
-	for key, val := range writes {
-		if err := sr.base.Set(ctx, key, val); err != nil {
+func (sr *simpleReliable) Commit(ctx context.Context, writes map[string]WriteData) error {
+	for key, wr := range writes {
+		if err := sr.base.Set(ctx, key, wr.Data, wr.Type); err != nil {
 			panic(err)
 		}
 	}
@@ -107,24 +107,24 @@ func (c *cache) skip(key string, data []byte) bool {
 	return ok && bytes.Equal(cand.([]byte), data)
 }
 
-func (c *cache) Commit(ctx context.Context, writes map[string][]byte) error {
-	dedupedWrites := make(map[string][]byte)
-	for key, data := range writes {
-		if c.skip(key, data) {
+func (c *cache) Commit(ctx context.Context, writes map[string]WriteData) error {
+	dedupedWrites := make(map[string]WriteData)
+	for key, wr := range writes {
+		if c.skip(key, wr.Data) {
 			continue
 		}
-		dedupedWrites[key] = data
+		dedupedWrites[key] = wr
 	}
 
 	if err := c.base.Commit(ctx, dedupedWrites); err != nil {
 		return err
 	}
 
-	for key, data := range dedupedWrites {
-		if data == nil {
+	for key, wr := range dedupedWrites {
+		if wr.Data == nil {
 			c.cache.Remove(key)
 		} else {
-			c.cache.Add(key, dup(data))
+			c.cache.Add(key, dup(wr.Data))
 		}
 	}
 	return nil

@@ -5,19 +5,11 @@ import (
 	"fmt"
 )
 
-type changes struct {
-	Writes map[string][]byte
-}
-
-func newChanges() *changes {
-	return &changes{Writes: make(map[string][]byte)}
-}
-
 // BufferedStorage is an extension of the ReliableStorage interface that will
 // buffer many changes and then commit them all at once.
 type BufferedStorage struct {
 	base    ReliableStorage
-	pending *changes
+	pending map[string]WriteData
 }
 
 func NewBufferedStorage(base ReliableStorage) *BufferedStorage {
@@ -32,7 +24,7 @@ func (bs *BufferedStorage) Start(ctx context.Context) error {
 	if err := bs.base.Start(ctx); err != nil {
 		return err
 	}
-	bs.pending = newChanges()
+	bs.pending = make(map[string]WriteData)
 
 	return nil
 }
@@ -42,9 +34,9 @@ func (bs *BufferedStorage) Get(ctx context.Context, key string) ([]byte, error) 
 		return nil, fmt.Errorf("app: transaction not active")
 	}
 
-	if data, ok := bs.pending.Writes[key]; ok {
-		if data != nil {
-			return dup(data), nil
+	if wr, ok := bs.pending[key]; ok {
+		if wr.Data != nil {
+			return dup(wr.Data), nil
 		}
 		return nil, ErrObjectNotFound
 	}
@@ -59,9 +51,9 @@ func (bs *BufferedStorage) GetMany(ctx context.Context, keys []string) (map[stri
 	out := make(map[string][]byte)
 	remaining := make([]string, 0)
 	for _, key := range keys {
-		if data, ok := bs.pending.Writes[key]; ok {
-			if data != nil {
-				out[key] = dup(data)
+		if wr, ok := bs.pending[key]; ok {
+			if wr.Data != nil {
+				out[key] = dup(wr.Data)
 			}
 			continue
 		}
@@ -81,11 +73,11 @@ func (bs *BufferedStorage) GetMany(ctx context.Context, keys []string) (map[stri
 	return out, nil
 }
 
-func (bs *BufferedStorage) Set(ctx context.Context, key string, data []byte) error {
+func (bs *BufferedStorage) Set(ctx context.Context, key string, data []byte, dt DataType) error {
 	if bs.pending == nil {
 		return fmt.Errorf("app: transaction not active")
 	}
-	bs.pending.Writes[key] = dup(data)
+	bs.pending[key] = WriteData{Data: dup(data), Type: dt}
 	return nil
 }
 
@@ -93,7 +85,7 @@ func (bs *BufferedStorage) Delete(ctx context.Context, key string) error {
 	if bs.pending == nil {
 		return fmt.Errorf("app: transaction not active")
 	}
-	bs.pending.Writes[key] = nil
+	bs.pending[key] = WriteData{Data: nil}
 	return nil
 }
 
@@ -103,7 +95,7 @@ func (bs *BufferedStorage) Commit(ctx context.Context) error {
 		return fmt.Errorf("app: transaction not active")
 	}
 
-	if err := bs.base.Commit(ctx, bs.pending.Writes); err != nil {
+	if err := bs.base.Commit(ctx, bs.pending); err != nil {
 		return err
 	}
 	bs.pending = nil

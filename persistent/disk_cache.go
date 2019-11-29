@@ -207,11 +207,11 @@ func (dc *diskCache) Get(ctx context.Context, key string) ([]byte, error) {
 	return data, nil
 }
 
-func (dc *diskCache) Set(ctx context.Context, key string, data []byte) error {
+func (dc *diskCache) Set(ctx context.Context, key string, data []byte, dt DataType) error {
 	dc.mapMu.Lock(key)
 	defer dc.mapMu.Unlock(key)
 
-	if err := dc.base.Set(ctx, key, data); err != nil {
+	if err := dc.base.Set(ctx, key, data, dt); err != nil {
 		dc.removeFromCache(key)
 		return err
 	}

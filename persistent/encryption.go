@@ -70,14 +70,14 @@ func (e *encryption) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]b
 	return out, nil
 }
 
-func (e *encryption) Set(ctx context.Context, ptr uint64, data []byte) error {
+func (e *encryption) Set(ctx context.Context, ptr uint64, data []byte, dt DataType) error {
 	nonce := make([]byte, e.aead.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
 		return err
 	}
 	ct := e.aead.Seal(nil, nonce, data, []byte(fmt.Sprintf("%x", ptr)))
 
-	return e.base.Set(ctx, ptr, append(nonce, ct...))
+	return e.base.Set(ctx, ptr, append(nonce, ct...), dt)
 }
 
 func (e *encryption) Commit(ctx context.Context) error { return e.base.Commit(ctx) }

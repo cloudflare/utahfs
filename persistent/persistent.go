@@ -10,6 +10,16 @@ import (
 
 const nilPtr = ^uint64(0)
 
+// DataType represents the semantics of the data in a Set operation. It helps
+// layers lower in the stack make smarter caching / performance decisions.
+type DataType int
+
+const (
+	Unknown DataType = iota
+	Metadata
+	Content
+)
+
 var (
 	ErrObjectNotFound = errors.New("object not found")
 )
@@ -22,9 +32,14 @@ type ObjectStorage interface {
 	Get(ctx context.Context, key string) (data []byte, err error)
 	// Set updates the object with the given key or creates the object if it
 	// does not exist.
-	Set(ctx context.Context, key string, data []byte) (err error)
+	Set(ctx context.Context, key string, data []byte, dt DataType) (err error)
 	// Delete removes the object with the given key.
 	Delete(ctx context.Context, key string) (err error)
+}
+
+type WriteData struct {
+	Data []byte
+	Type DataType
 }
 
 // ReliableStorage is an extension of the ObjectStorage interface that provides
@@ -41,7 +56,7 @@ type ReliableStorage interface {
 
 	// Commit persists the changes in `writes` to the backend, atomically. If
 	// the value of a key is nil, then that key is deleted.
-	Commit(ctx context.Context, writes map[string][]byte) error
+	Commit(ctx context.Context, writes map[string]WriteData) error
 }
 
 // BlockStorage is a derivative of ObjectStorage that uses uint64 pointers as
@@ -51,7 +66,7 @@ type BlockStorage interface {
 
 	Get(ctx context.Context, ptr uint64) (data []byte, err error)
 	GetMany(ctx context.Context, ptr []uint64) (data map[uint64][]byte, err error)
-	Set(ctx context.Context, ptr uint64, data []byte) (err error)
+	Set(ctx context.Context, ptr uint64, data []byte, dt DataType) (err error)
 
 	Commit(ctx context.Context) error
 	Rollback(ctx context.Context)

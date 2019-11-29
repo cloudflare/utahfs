@@ -19,7 +19,7 @@ func (m memory) Get(ctx context.Context, key string) ([]byte, error) {
 	return dup(data), nil
 }
 
-func (m memory) Set(ctx context.Context, key string, data []byte) error {
+func (m memory) Set(ctx context.Context, key string, data []byte, dt DataType) error {
 	m[key] = dup(data)
 	return nil
 }
@@ -54,9 +54,9 @@ func (r *retry) Get(ctx context.Context, key string) (data []byte, err error) {
 	return
 }
 
-func (r *retry) Set(ctx context.Context, key string, data []byte) (err error) {
+func (r *retry) Set(ctx context.Context, key string, data []byte, dt DataType) (err error) {
 	for i := 0; i < r.attempts; i++ {
-		err = r.base.Set(ctx, key, data)
+		err = r.base.Set(ctx, key, data, dt)
 		if err == nil {
 			return
 		}

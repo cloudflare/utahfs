@@ -292,14 +292,14 @@ func (i *integrity) createChecksumBlocks(ctx context.Context, prev, curr uint64)
 		// Write the new checksum blocks.
 		for offset := prev; offset < curr; offset++ {
 			if offset == 0 {
-				if err := i.base.Set(ctx, checksumPtr(level, offset), dataLeft); err != nil {
+				if err := i.base.Set(ctx, checksumPtr(level, offset), dataLeft, Metadata); err != nil {
 					return err
 				}
 				// Only update this value when we consume it, since we took the
 				// tree head and that's already several layers up the tree.
 				expectedLeft = intermediateHash(dataLeft)
 			} else {
-				if err := i.base.Set(ctx, checksumPtr(level, offset), dataRest); err != nil {
+				if err := i.base.Set(ctx, checksumPtr(level, offset), dataRest, Metadata); err != nil {
 					return err
 				}
 			}
@@ -325,13 +325,13 @@ func (i *integrity) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]by
 	return out, nil
 }
 
-func (i *integrity) Set(ctx context.Context, ptr uint64, data []byte) error {
+func (i *integrity) Set(ctx context.Context, ptr uint64, data []byte, dt DataType) error {
 	if ptr+1 > i.curr.Nodes {
 		if err := i.createChecksumBlocks(ctx, i.curr.Nodes, ptr+1); err != nil {
 			return err
 		}
 	}
-	if err := i.base.Set(ctx, dataPtr(ptr), data); err != nil {
+	if err := i.base.Set(ctx, dataPtr(ptr), data, dt); err != nil {
 		return err
 	}
 
@@ -359,7 +359,7 @@ func (i *integrity) Set(ctx context.Context, ptr uint64, data []byte) error {
 		prev = intermediateHash(block)
 
 		copy(block[32*check[1]:], expected[:])
-		if err := i.base.Set(ctx, ptrs[level], block); err != nil {
+		if err := i.base.Set(ctx, ptrs[level], block, Metadata); err != nil {
 			return err
 		}
 		expected = intermediateHash(block)
@@ -379,7 +379,7 @@ func (i *integrity) Commit(ctx context.Context) error {
 	data, err := marshalTreeHead(i.curr, i.mac)
 	if err != nil {
 		return err
-	} else if err := i.base.Set(ctx, 0, data); err != nil {
+	} else if err := i.base.Set(ctx, 0, data, Metadata); err != nil {
 		return err
 	} else if err := i.base.Commit(ctx); err != nil {
 		return err

@@ -53,7 +53,7 @@ func NewLocalWAL(base ObjectStorage, loc string, maxSize, parallelism int) (Reli
 	if err != nil {
 		return nil, err
 	}
-	_, err = local.Exec(`CREATE TABLE IF NOT EXISTS wal (id integer not null primary key, key text, val bytea); CREATE INDEX IF NOT EXISTS by_key ON wal(key);`)
+	_, err = local.Exec(`CREATE TABLE IF NOT EXISTS wal (id integer not null primary key, key text, val bytea, dt integer); CREATE INDEX IF NOT EXISTS by_key ON wal(key);`)
 	if err != nil {
 		return nil, err
 	}
@@ -98,6 +98,7 @@ func (lw *localWAL) drain() {
 type walReq struct {
 	key string
 	val []byte
+	dt  DataType
 }
 
 func (lw *localWAL) drainOnce() error {
@@ -115,7 +116,7 @@ func (lw *localWAL) drainOnce() error {
 
 				var err error
 				if len(req.val) > 0 {
-					err = lw.base.Set(context.Background(), req.key, req.val)
+					err = lw.base.Set(context.Background(), req.key, req.val, req.dt)
 				} else {
 					err = lw.base.Delete(context.Background(), req.key)
 				}
@@ -130,8 +131,9 @@ func (lw *localWAL) drainOnce() error {
 			ids  []string
 			keys []string
 			vals [][]byte
+			dts  []DataType
 		)
-		rows, err := lw.local.Query("SELECT id, key, val FROM wal LIMIT 100;")
+		rows, err := lw.local.Query("SELECT id, key, val, dt FROM wal LIMIT 100;")
 		if err != nil {
 			return err
 		}
@@ -141,14 +143,16 @@ func (lw *localWAL) drainOnce() error {
 				id  int
 				key string
 				val []byte
+				dt  DataType
 			)
-			if err := rows.Scan(&id, &key, &val); err != nil {
+			if err := rows.Scan(&id, &key, &val, &dt); err != nil {
 				rows.Close()
 				return err
 			}
 			ids = append(ids, fmt.Sprint(id))
 			keys = append(keys, key)
 			vals = append(vals, val)
+			dts = append(dts, dt)
 		}
 		if err := rows.Err(); err != nil {
 			rows.Close()
@@ -162,7 +166,7 @@ func (lw *localWAL) drainOnce() error {
 		// Write entries read from the WAL to the underlying storage. This is
 		// done outside of the database query to prevent blocking other threads.
 		for i, _ := range ids {
-			reqs <- walReq{keys[i], vals[i]}
+			reqs <- walReq{keys[i], vals[i], dts[i]}
 		}
 		for range ids {
 			if subErr := <-errs; subErr != nil {
@@ -255,7 +259,7 @@ func (lw *localWAL) GetMany(ctx context.Context, keys []string) (map[string][]by
 	return out, nil
 }
 
-func (lw *localWAL) Commit(ctx context.Context, writes map[string][]byte) error {
+func (lw *localWAL) Commit(ctx context.Context, writes map[string]WriteData) error {
 	if len(writes) == 0 {
 		return nil
 	}
@@ -269,17 +273,17 @@ func (lw *localWAL) Commit(ctx context.Context, writes map[string][]byte) error 
 		tx.Rollback()
 		return err
 	}
-	insertStmt, err := tx.Prepare("INSERT INTO wal (key, val) VALUES (?, ?);")
+	insertStmt, err := tx.Prepare("INSERT INTO wal (key, val, dt) VALUES (?, ?, ?);")
 	if err != nil {
 		tx.Rollback()
 		return err
 	}
 
-	for key, val := range writes {
+	for key, wr := range writes {
 		if _, err := delStmt.Exec(key); err != nil {
 			tx.Rollback()
 			return err
-		} else if _, err := insertStmt.Exec(key, val); err != nil {
+		} else if _, err := insertStmt.Exec(key, wr.Data, wr.Type); err != nil {
 			tx.Rollback()
 			return err
 		}
