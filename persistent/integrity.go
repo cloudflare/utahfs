@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -14,7 +15,6 @@ import (
 	"os"
 	"path"
 
-	"golang.org/x/crypto/blake2b"
 	"golang.org/x/crypto/pbkdf2"
 )
 
@@ -155,11 +155,11 @@ func leafHash(data []byte) [32]byte {
 	if data == nil {
 		return [32]byte{}
 	}
-	return blake2b.Sum256(append([]byte{0}, data...))
+	return sha256.Sum256(append([]byte{0}, data...))
 }
 
 func intermediateHash(data []byte) [32]byte {
-	return blake2b.Sum256(append([]byte{1}, data...))
+	return sha256.Sum256(append([]byte{1}, data...))
 }
 
 type integrity struct {
@@ -179,15 +179,12 @@ type integrity struct {
 // root and other metadata is kept in `pinFile`.
 func WithIntegrity(base BlockStorage, password, pinFile string) (BlockStorage, error) {
 	key := pbkdf2.Key([]byte(password), []byte("534ffca65b68a9b3"), 4096, 32, sha1.New)
-	mac, err := blake2b.New512(key)
-	if err != nil {
-		return nil, err
-	}
+	mac := hmac.New(sha256.New, key)
+
 	pinned, err := readPinFile(pinFile, mac)
 	if err != nil {
 		return nil, err
 	}
-
 	return &integrity{base, mac, pinned, nil, pinFile}, nil
 }
 
