@@ -56,7 +56,7 @@ func (bfs *BlockFilesystem) blockDataSize() int64 { return 3 + bfs.dataSize }
 
 // allocate returns the pointer of a block which is free for use by the caller.
 func (bfs *BlockFilesystem) allocate(ctx context.Context) (uint64, error) {
-	state, err := bfs.store.State()
+	state, err := bfs.store.State(ctx)
 	if err != nil {
 		return nilPtr, err
 	} else if state.TrashPtr == nilPtr {
@@ -161,7 +161,7 @@ func (bfs *BlockFilesystem) Unlink(ctx context.Context, ptr uint64) error {
 
 	// Prepend the trash list with `bf` by setting the tail pointer of `bf` as
 	// the current value of `trash` and updating `trash` to be the head of `bf`.
-	state, err := bfs.store.State()
+	state, err := bfs.store.State(ctx)
 	if err != nil {
 		return err
 	}

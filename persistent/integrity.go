@@ -254,22 +254,13 @@ func (i *integrity) validateGet(ptrs []uint64, checks [][2]uint64, data map[uint
 }
 
 func (i *integrity) Get(ctx context.Context, ptr uint64) ([]byte, error) {
-	if ptr >= i.curr.Nodes {
-		return nil, ErrObjectNotFound
-	}
-	ptrs, checks := i.getMeta(ptr)
-
-	data, err := i.base.GetMany(ctx, ptrs)
+	data, err := i.GetMany(ctx, []uint64{ptr})
 	if err != nil {
 		return nil, err
-	} else if err := i.validateGet(ptrs, checks, data); err != nil {
-		return nil, err
-	}
-
-	if data[ptrs[0]] == nil {
+	} else if data[ptr] == nil {
 		return nil, ErrObjectNotFound
 	}
-	return data[ptrs[0]], nil
+	return data[ptr], nil
 }
 
 func (i *integrity) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]byte, error) {

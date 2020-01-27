@@ -105,7 +105,7 @@ func NewFilesystem(bfs *BlockFilesystem) (fuseutil.FileSystem, error) {
 	}
 	defer nm.Rollback(ctx)
 
-	state, err := nm.State()
+	state, err := nm.State(ctx)
 	if err != nil {
 		return nil, err
 	} else if state.RootPtr == nilPtr {

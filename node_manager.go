@@ -200,7 +200,9 @@ func (nm *nodeManager) Start(ctx context.Context) error  { return nm.bfs.store.S
 func (nm *nodeManager) Commit(ctx context.Context) error { return nm.bfs.store.Commit(ctx) }
 func (nm *nodeManager) Rollback(ctx context.Context)     { nm.bfs.store.Rollback(ctx) }
 
-func (nm *nodeManager) State() (*persistent.State, error) { return nm.bfs.store.State() }
+func (nm *nodeManager) State(ctx context.Context) (*persistent.State, error) {
+	return nm.bfs.store.State(ctx)
+}
 
 func (nm *nodeManager) Create(ctx context.Context, mode os.FileMode) (uint64, error) {
 	now := time.Now()
