@@ -45,7 +45,7 @@ func generateConfig(transportKey, hostname string) (*tls.Config, error) {
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
 
 		BasicConstraintsValid: true,
-		IsCA:                  true,
+		IsCA: true,
 	}
 	caRaw, err := x509.CreateCertificate(rand.Reader, caTempl, caTempl, caPriv.Public(), caPriv)
 	if err != nil {

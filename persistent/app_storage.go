@@ -97,6 +97,24 @@ func (as *AppStorage) Get(ctx context.Context, ptr uint64) ([]byte, error) {
 	return as.base.Get(ctx, ptr+1)
 }
 
+func (as *AppStorage) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]byte, error) {
+	corrected := make([]uint64, 0, len(ptrs))
+	for _, ptr := range ptrs {
+		corrected = append(corrected, ptr+1)
+	}
+
+	data, err := as.base.GetMany(ctx, corrected)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make(map[uint64][]byte)
+	for ptr, val := range data {
+		out[ptr-1] = val
+	}
+	return out, nil
+}
+
 func (as *AppStorage) Set(ctx context.Context, ptr uint64, data []byte, dt DataType) error {
 	if as.state == nil {
 		return fmt.Errorf("app: transaction not active")

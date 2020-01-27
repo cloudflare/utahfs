@@ -221,40 +221,109 @@ func (i *integrity) Start(ctx context.Context) error {
 	return nil
 }
 
-func (i *integrity) Get(ctx context.Context, ptr uint64) ([]byte, error) {
-	if ptr >= i.curr.Nodes {
-		return nil, ErrObjectNotFound
-	}
-	ptrs := []uint64{dataPtr(ptr)}
-	checks := checksumBlocks(ptr, i.curr.Nodes)
+func (i *integrity) getMeta(ptr uint64) (ptrs []uint64, checks [][2]uint64) {
+	ptrs = []uint64{dataPtr(ptr)}
+
+	checks = checksumBlocks(ptr, i.curr.Nodes)
 	for level, check := range checks {
 		ptrs = append(ptrs, checksumPtr(level, check[0]))
 	}
 
-	data, err := i.base.GetMany(ctx, ptrs)
-	if err != nil {
-		return nil, err
-	}
+	return ptrs, checks
+}
 
+func (i *integrity) validateGet(ptrs []uint64, checks [][2]uint64, data map[uint64][]byte) error {
 	expected := leafHash(data[ptrs[0]])
+
 	for level, check := range checks {
 		block, ok := data[ptrs[level+1]]
 		if !ok {
-			return nil, fmt.Errorf("integrity: missing checksum block")
+			return fmt.Errorf("integrity: missing checksum block")
 		} else if len(block) != 8*32 {
-			return nil, fmt.Errorf("integrity: checksum block is malformed")
+			return fmt.Errorf("integrity: checksum block is malformed")
 		} else if !bytes.Equal(expected[:], block[32*check[1]:32*check[1]+32]) {
-			return nil, fmt.Errorf("integrity: block does not equal expected value")
+			return fmt.Errorf("integrity: block does not equal expected value")
 		}
 		expected = intermediateHash(block)
 	}
 
 	if !bytes.Equal(expected[:], i.curr.Hash) {
-		return nil, fmt.Errorf("integrity: block does not equal tree head")
-	} else if data == nil {
+		return fmt.Errorf("integrity: block does not equal tree head")
+	}
+	return nil
+}
+
+func (i *integrity) Get(ctx context.Context, ptr uint64) ([]byte, error) {
+	if ptr >= i.curr.Nodes {
+		return nil, ErrObjectNotFound
+	}
+	ptrs, checks := i.getMeta(ptr)
+
+	data, err := i.base.GetMany(ctx, ptrs)
+	if err != nil {
+		return nil, err
+	} else if err := i.validateGet(ptrs, checks, data); err != nil {
+		return nil, err
+	}
+
+	if data[ptrs[0]] == nil {
 		return nil, ErrObjectNotFound
 	}
 	return data[ptrs[0]], nil
+}
+
+func (i *integrity) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]byte, error) {
+	// Calculate the pointers to fetch and checks to perform for each Get.
+	ptrRef := make([]uint64, 0, len(ptrs))
+	allPtrs := make([][]uint64, 0, len(ptrs))
+	allChecks := make([][][2]uint64, 0, len(ptrs))
+
+	for _, ptr := range ptrs {
+		if ptr >= i.curr.Nodes {
+			continue
+		}
+		ptrs1, checks1 := i.getMeta(ptr)
+
+		ptrRef = append(ptrRef, ptr)
+		allPtrs = append(allPtrs, ptrs1)
+		allChecks = append(allChecks, checks1)
+	}
+
+	// Construct the de-duplicated set of pointers to request.
+	dedupPtrs := make(map[uint64]struct{})
+	for _, ptrs1 := range allPtrs {
+		for _, ptr := range ptrs1 {
+			dedupPtrs[ptr] = struct{}{}
+		}
+	}
+
+	finalPtrs := make([]uint64, 0, len(dedupPtrs))
+	for ptr, _ := range dedupPtrs {
+		finalPtrs = append(finalPtrs, ptr)
+	}
+
+	// Actually fetch the data we need from the backend.
+	data, err := i.base.GetMany(ctx, finalPtrs)
+	if err != nil {
+		return nil, err
+	}
+
+	// Validate all data fetched.
+	for j, _ := range ptrRef {
+		if err := i.validateGet(allPtrs[j], allChecks[j], data); err != nil {
+			return nil, err
+		}
+	}
+
+	// Construct output map.
+	out := make(map[uint64][]byte)
+	for i, ptr := range ptrRef {
+		d, ok := data[allPtrs[i][0]]
+		if ok {
+			out[ptr] = d
+		}
+	}
+	return out, nil
 }
 
 func (i *integrity) createChecksumBlocks(ctx context.Context, prev, curr uint64) error {
@@ -309,20 +378,6 @@ func (i *integrity) createChecksumBlocks(ctx context.Context, prev, curr uint64)
 	i.curr.Nodes = curr2
 	i.curr.Hash = expectedLeft[:]
 	return nil
-}
-
-func (i *integrity) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]byte, error) {
-	out := make(map[uint64][]byte)
-	for _, ptr := range ptrs {
-		val, err := i.Get(ctx, ptr)
-		if err == ErrObjectNotFound {
-			continue
-		} else if err != nil {
-			return nil, err
-		}
-		out[ptr] = val
-	}
-	return out, nil
 }
 
 func (i *integrity) Set(ctx context.Context, ptr uint64, data []byte, dt DataType) error {

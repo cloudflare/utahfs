@@ -211,18 +211,27 @@ func (bf *BlockFile) persist() error {
 // load pulls the block at `ptr` into memory. `pos` is our new position in the
 // file.
 func (bf *BlockFile) load(ptr uint64, pos int64, data bool) error { // NOTE: Don't load ptrs twice.
-	rawPtrs, err := bf.parent.store.Get(bf.ctx, p(ptr))
+	ptrPtr, dataPtr := p(ptr), d(ptr)
+	ptrs := []uint64{ptrPtr}
+	if data {
+		ptrs = append(ptrs, dataPtr)
+	}
+
+	raw, err := bf.parent.store.GetMany(bf.ctx, ptrs)
 	if err != nil {
 		return err
 	}
+	for _, ptr := range ptrs {
+		if raw[ptr] == nil {
+			return persistent.ErrObjectNotFound
+		}
+	}
+
 	curr := &block{parent: bf.parent}
-	if err := curr.UnmarshalPtrs(rawPtrs); err != nil {
+	if err := curr.UnmarshalPtrs(raw[ptrPtr]); err != nil {
 		return fmt.Errorf("blockfs: failed to parse block %x: %v", ptr, err)
 	} else if data {
-		rawData, err := bf.parent.store.Get(bf.ctx, d(ptr))
-		if err != nil {
-			return err
-		} else if err := curr.UnmarshalData(rawData); err != nil {
+		if err := curr.UnmarshalData(raw[dataPtr]); err != nil {
 			return fmt.Errorf("blockfs: failed to parse block %x: %v", ptr, err)
 		}
 	}
