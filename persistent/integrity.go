@@ -14,6 +14,7 @@ import (
 	"log"
 	"os"
 	"path"
+	"time"
 
 	"golang.org/x/crypto/pbkdf2"
 )
@@ -169,7 +170,8 @@ type integrity struct {
 	pinned *treeHead
 	curr   *treeHead
 
-	pinFile string
+	pinFile  string
+	lastSave time.Time
 }
 
 // WithIntegrity wraps a BlockStorage implementation and builds a Merkle tree
@@ -185,7 +187,7 @@ func WithIntegrity(base BlockStorage, password, pinFile string) (BlockStorage, e
 	if err != nil {
 		return nil, err
 	}
-	return &integrity{base, mac, pinned, nil, pinFile}, nil
+	return &integrity{base, mac, pinned, nil, pinFile, time.Time{}}, nil
 }
 
 func (i *integrity) Start(ctx context.Context, prefetch []uint64) (map[uint64][]byte, error) {
@@ -220,6 +222,17 @@ func (i *integrity) Start(ctx context.Context, prefetch []uint64) (map[uint64][]
 		}
 	}
 	i.pinned, i.curr = pinned, pinned.clone()
+
+	// If a new integrity pin hasn't been saved to disk in some time, do that.
+	if time.Since(i.lastSave) > 10*time.Second {
+		if err := os.MkdirAll(path.Dir(i.pinFile), 0744); err != nil {
+			log.Printf("integrity: failed to create directory for pin file: %v", err)
+		} else if err := ioutil.WriteFile(i.pinFile, data[0], 0744); err != nil {
+			log.Printf("integrity: failed to write pin file: %v", err)
+		} else {
+			i.lastSave = time.Now()
+		}
+	}
 
 	return nil, nil
 }
@@ -440,6 +453,8 @@ func (i *integrity) Commit(ctx context.Context) error {
 		log.Printf("integrity: failed to create directory for pin file: %v", err)
 	} else if err := ioutil.WriteFile(i.pinFile, data, 0744); err != nil {
 		log.Printf("integrity: failed to write pin file: %v", err)
+	} else {
+		i.lastSave = time.Now()
 	}
 
 	return nil
