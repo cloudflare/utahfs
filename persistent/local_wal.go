@@ -208,7 +208,7 @@ func (lw *localWAL) count() (int, error) {
 	return count, nil
 }
 
-func (lw *localWAL) Start(ctx context.Context) error {
+func (lw *localWAL) Start(ctx context.Context, prefetch []string) (map[string][]byte, error) {
 	// Block until the database has drained enough to accept new writes.
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -216,19 +216,19 @@ func (lw *localWAL) Start(ctx context.Context) error {
 	for {
 		count, err := lw.count()
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		if count > lw.maxSize {
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return nil, ctx.Err()
 			case lw.wake <- struct{}{}:
 			case <-ticker.C:
 			}
 			continue
 		}
-		return nil
+		return lw.GetMany(ctx, prefetch)
 	}
 }
 

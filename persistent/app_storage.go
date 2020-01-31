@@ -62,7 +62,7 @@ func (as *AppStorage) Start(ctx context.Context) error {
 		return fmt.Errorf("app: transaction already started")
 	}
 
-	if err := as.base.Start(ctx); err != nil {
+	if _, err := as.base.Start(ctx, nil); err != nil {
 		return err
 	}
 	as.active = true
@@ -104,6 +104,10 @@ func (as *AppStorage) Get(ctx context.Context, ptr uint64) ([]byte, error) {
 }
 
 func (as *AppStorage) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]byte, error) {
+	if !as.active {
+		return nil, fmt.Errorf("app: transaction not active")
+	}
+
 	corrected := make([]uint64, 0, len(ptrs))
 	for _, ptr := range ptrs {
 		corrected = append(corrected, ptr+1)

@@ -188,37 +188,40 @@ func WithIntegrity(base BlockStorage, password, pinFile string) (BlockStorage, e
 	return &integrity{base, mac, pinned, nil, pinFile}, nil
 }
 
-func (i *integrity) Start(ctx context.Context) error {
-	if err := i.base.Start(ctx); err != nil {
-		return err
+func (i *integrity) Start(ctx context.Context, prefetch []uint64) (map[uint64][]byte, error) {
+	if len(prefetch) > 0 {
+		return nil, fmt.Errorf("integrity: prefetch is not supported")
+	}
+	data, err := i.base.Start(ctx, []uint64{0})
+	if err != nil {
+		return nil, err
 	}
 
 	// Read the tree head from storage and validate it against the one we have
 	// pinned.
-	data, err := i.base.Get(ctx, 0)
-	if err == ErrObjectNotFound {
+	if data[0] == nil {
 		i.pinned, i.curr = &treeHead{}, &treeHead{}
-		return nil
+		return nil, nil
 	} else if err != nil {
 		i.Rollback(ctx)
-		return err
+		return nil, err
 	}
-	pinned, err := unmarshalTreeHead(data, i.mac)
+	pinned, err := unmarshalTreeHead(data[0], i.mac)
 	if err != nil {
 		i.Rollback(ctx)
-		return err
+		return nil, err
 	} else if pinned.Version < i.pinned.Version {
 		i.Rollback(ctx)
-		return fmt.Errorf("integrity: tree head read from remote storage is older than expected")
+		return nil, fmt.Errorf("integrity: tree head read from remote storage is older than expected")
 	} else if pinned.Version == i.pinned.Version {
 		if !bytes.Equal(pinned.Hash, i.pinned.Hash) {
 			i.Rollback(ctx)
-			return fmt.Errorf("integrity: tree head read from remote storage has unexpected root hash")
+			return nil, fmt.Errorf("integrity: tree head read from remote storage has unexpected root hash")
 		}
 	}
 	i.pinned, i.curr = pinned, pinned.clone()
 
-	return nil
+	return nil, nil
 }
 
 func (i *integrity) getMeta(ptr uint64) (ptrs []uint64, checks [][2]uint64) {

@@ -17,7 +17,9 @@ func NewSimpleReliable(base ObjectStorage) ReliableStorage {
 	return &simpleReliable{base}
 }
 
-func (sr *simpleReliable) Start(ctx context.Context) error { return nil }
+func (sr *simpleReliable) Start(ctx context.Context, prefetch []string) (map[string][]byte, error) {
+	return sr.GetMany(ctx, prefetch)
+}
 
 func (sr *simpleReliable) Get(ctx context.Context, key string) ([]byte, error) {
 	return sr.base.Get(ctx, key)
@@ -61,24 +63,10 @@ func NewCache(base ReliableStorage, size int) (ReliableStorage, error) {
 	return &cache{base, c}, nil
 }
 
-func (c *cache) Start(ctx context.Context) error { return c.base.Start(ctx) }
+func (c *cache) filterCached(keys []string) (out map[string][]byte, remaining []string) {
+	out = make(map[string][]byte)
+	remaining = make([]string, 0)
 
-func (c *cache) Get(ctx context.Context, key string) ([]byte, error) {
-	val, ok := c.cache.Get(key)
-	if ok {
-		return dup(val.([]byte)), nil
-	}
-	data, err := c.base.Get(ctx, key)
-	if err != nil {
-		return nil, err
-	}
-	c.cache.Add(key, dup(data))
-	return data, nil
-}
-
-func (c *cache) GetMany(ctx context.Context, keys []string) (map[string][]byte, error) {
-	out := make(map[string][]byte)
-	remaining := make([]string, 0)
 	for _, key := range keys {
 		val, ok := c.cache.Get(key)
 		if ok {
@@ -88,15 +76,47 @@ func (c *cache) GetMany(ctx context.Context, keys []string) (map[string][]byte, 
 		remaining = append(remaining, key)
 	}
 
+	return
+}
+
+func (c *cache) cacheAndOutput(data, out map[string][]byte) {
+	for key, val := range data {
+		out[key] = val
+		c.cache.Add(key, dup(val))
+	}
+}
+
+func (c *cache) Start(ctx context.Context, prefetch []string) (map[string][]byte, error) {
+	out, remaining := c.filterCached(prefetch)
+
+	data, err := c.base.Start(ctx, remaining)
+	if err != nil {
+		return nil, err
+	}
+	c.cacheAndOutput(data, out)
+
+	return out, nil
+}
+
+func (c *cache) Get(ctx context.Context, key string) ([]byte, error) {
+	data, err := c.GetMany(ctx, []string{key})
+	if err != nil {
+		return nil, err
+	} else if data[key] == nil {
+		return nil, ErrObjectNotFound
+	}
+	return data[key], nil
+}
+
+func (c *cache) GetMany(ctx context.Context, keys []string) (map[string][]byte, error) {
+	out, remaining := c.filterCached(keys)
+
 	if len(remaining) > 0 {
 		data, err := c.base.GetMany(ctx, remaining)
 		if err != nil {
 			return nil, err
 		}
-		for key, val := range data {
-			out[key] = val
-			c.cache.Add(key, dup(val))
-		}
+		c.cacheAndOutput(data, out)
 	}
 
 	return out, nil

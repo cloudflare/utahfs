@@ -285,41 +285,44 @@ func (rc *remoteClient) maintain() {
 	}
 }
 
-func (rc *remoteClient) Start(ctx context.Context) error {
+func (rc *remoteClient) Start(ctx context.Context, prefetch []string) (map[string][]byte, error) {
 	// Generate a random transaction id, let the server know about it, and store
 	// it in `rc` so that the maintainer thread knows about it.
 	if rc.getId() != "" {
-		return fmt.Errorf("remote: transaction already started")
+		return nil, fmt.Errorf("remote: transaction already started")
 	}
 	buff := make([]byte, 12)
 	if _, err := rand.Read(buff); err != nil {
-		return err
+		return nil, err
 	}
 	id := fmt.Sprintf("%x", buff)
 
-	if err := rc.post(ctx, "start?id="+id, nil); err != nil {
-		return err
+	loc := "start?id=" + id
+	for _, key := range prefetch {
+		loc += "&key=" + url.QueryEscape(key)
+	}
+	data, err := rc.get(ctx, loc)
+	if err != nil {
+		return nil, err
 	}
 
 	rc.mu.Lock()
 	if rc.id != "" {
-		return fmt.Errorf("remote: transaction already started")
+		return nil, fmt.Errorf("remote: transaction already started")
 	}
 	rc.id = id
 	rc.mu.Unlock()
-	return nil
+	return data, nil
 }
 
 func (rc *remoteClient) Get(ctx context.Context, key string) ([]byte, error) {
 	data, err := rc.GetMany(ctx, []string{key})
 	if err != nil {
 		return nil, err
-	}
-	val, ok := data[key]
-	if !ok {
+	} else if data[key] == nil {
 		return nil, ErrObjectNotFound
 	}
-	return val, nil
+	return data[key], nil
 }
 
 func (rc *remoteClient) GetMany(ctx context.Context, keys []string) (map[string][]byte, error) {
@@ -420,7 +423,7 @@ func (rs *remoteServer) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	defer rs.requestMu.Unlock()
 
 	switch {
-	case req.Method == "POST" && strings.HasSuffix(req.URL.Path, "/start"):
+	case req.Method == "GET" && strings.HasSuffix(req.URL.Path, "/start"):
 		rs.handleStart(rw, req)
 	case req.Method == "GET" && strings.HasSuffix(req.URL.Path, "/get"):
 		rs.handleGet(rw, req)
@@ -448,7 +451,8 @@ func (rs *remoteServer) handleStart(rw http.ResponseWriter, req *http.Request) {
 	}
 
 	// Start a new transaction, and record initial information about it.
-	if err := rs.base.Start(req.Context()); err != nil {
+	data, err := rs.base.Start(req.Context(), req.Form["key"])
+	if err != nil {
 		rs.transactionMu.Unlock()
 		log.Println(err)
 		rw.WriteHeader(http.StatusInternalServerError)
@@ -458,6 +462,10 @@ func (rs *remoteServer) handleStart(rw http.ResponseWriter, req *http.Request) {
 	rs.lastCheckIn = time.Now()
 
 	rw.WriteHeader(http.StatusOK)
+	if err := writeMap(rw, data); err != nil {
+		log.Println(err)
+		return
+	}
 }
 
 func (rs *remoteServer) handleGet(rw http.ResponseWriter, req *http.Request) {

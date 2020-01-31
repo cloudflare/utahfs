@@ -35,18 +35,21 @@ func WithEncryption(base BlockStorage, password string) (BlockStorage, error) {
 	return &encryption{base, aead}, nil
 }
 
-func (e *encryption) Start(ctx context.Context) error { return e.base.Start(ctx) }
+func (e *encryption) Start(ctx context.Context, prefetch []uint64) (map[uint64][]byte, error) {
+	if len(prefetch) > 0 {
+		return nil, fmt.Errorf("encryption: prefetch is not supported")
+	}
+	return e.base.Start(ctx, nil)
+}
 
 func (e *encryption) Get(ctx context.Context, ptr uint64) ([]byte, error) {
-	raw, err := e.base.Get(ctx, ptr)
+	data, err := e.GetMany(ctx, []uint64{ptr})
 	if err != nil {
 		return nil, err
+	} else if data[ptr] == nil {
+		return nil, ErrObjectNotFound
 	}
-	ns := e.aead.NonceSize()
-	if len(raw) < ns {
-		return nil, fmt.Errorf("storage: ciphertext is too small")
-	}
-	return e.aead.Open(nil, raw[:ns], raw[ns:], []byte(fmt.Sprintf("%x", ptr)))
+	return data[ptr], nil
 }
 
 func (e *encryption) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]byte, error) {

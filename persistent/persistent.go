@@ -49,7 +49,7 @@ type ReliableStorage interface {
 	// this is called, and will stop working again after Commit is called.
 	//
 	// Transactions are isolated and atomic.
-	Start(ctx context.Context) error
+	Start(ctx context.Context, prefetch []string) (data map[string][]byte, err error)
 
 	Get(ctx context.Context, key string) (data []byte, err error)
 	GetMany(ctx context.Context, keys []string) (data map[string][]byte, err error)
@@ -62,7 +62,7 @@ type ReliableStorage interface {
 // BlockStorage is a derivative of ObjectStorage that uses uint64 pointers as
 // keys instead of strings. It is meant to help make implementing ORAM easier.
 type BlockStorage interface {
-	Start(ctx context.Context) error
+	Start(ctx context.Context, prefetch []uint64) (data map[uint64][]byte, err error)
 
 	Get(ctx context.Context, ptr uint64) (data []byte, err error)
 	GetMany(ctx context.Context, ptr []uint64) (data map[uint64][]byte, err error)

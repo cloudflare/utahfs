@@ -16,31 +16,28 @@ func NewBufferedStorage(base ReliableStorage) *BufferedStorage {
 	return &BufferedStorage{base: base}
 }
 
-func (bs *BufferedStorage) Start(ctx context.Context) error {
+func (bs *BufferedStorage) Start(ctx context.Context, prefetch []string) (map[string][]byte, error) {
 	if bs.pending != nil {
-		return fmt.Errorf("app: transaction already started")
+		return nil, fmt.Errorf("app: transaction already started")
 	}
 
-	if err := bs.base.Start(ctx); err != nil {
-		return err
+	data, err := bs.base.Start(ctx, prefetch)
+	if err != nil {
+		return nil, err
 	}
 	bs.pending = make(map[string]WriteData)
 
-	return nil
+	return data, nil
 }
 
 func (bs *BufferedStorage) Get(ctx context.Context, key string) ([]byte, error) {
-	if bs.pending == nil {
-		return nil, fmt.Errorf("app: transaction not active")
-	}
-
-	if wr, ok := bs.pending[key]; ok {
-		if wr.Data != nil {
-			return dup(wr.Data), nil
-		}
+	data, err := bs.GetMany(ctx, []string{key})
+	if err != nil {
+		return nil, err
+	} else if data[key] == nil {
 		return nil, ErrObjectNotFound
 	}
-	return bs.base.Get(ctx, key)
+	return data[key], nil
 }
 
 func (bs *BufferedStorage) GetMany(ctx context.Context, keys []string) (map[string][]byte, error) {

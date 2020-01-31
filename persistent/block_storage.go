@@ -16,29 +16,22 @@ func NewSimpleBlock(base *BufferedStorage) BlockStorage {
 	return simpleBlock{base}
 }
 
-func (sb simpleBlock) Start(ctx context.Context) error {
-	return sb.base.Start(ctx)
-}
+func (sb simpleBlock) convertToKeys(ptrs []uint64) (keys []string, conversion map[string]uint64) {
+	keys = make([]string, 0, len(ptrs))
+	conversion = make(map[string]uint64)
 
-func (sb simpleBlock) Get(ctx context.Context, ptr uint64) ([]byte, error) {
-	return sb.base.Get(ctx, fmt.Sprintf("%x", ptr))
-}
-
-func (sb simpleBlock) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]byte, error) {
-	keys := make([]string, 0, len(ptrs))
-	conversion := make(map[string]uint64)
 	for _, ptr := range ptrs {
 		key := fmt.Sprintf("%x", ptr)
 		keys = append(keys, key)
 		conversion[key] = ptr
 	}
 
-	data, err := sb.base.GetMany(ctx, keys)
-	if err != nil {
-		return nil, err
-	}
+	return
+}
 
+func (sb simpleBlock) convertToOutput(conversion map[string]uint64, data map[string][]byte) (map[uint64][]byte, error) {
 	out := make(map[uint64][]byte)
+
 	for key, val := range data {
 		ptr, ok := conversion[key]
 		if !ok {
@@ -46,7 +39,34 @@ func (sb simpleBlock) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]
 		}
 		out[ptr] = val
 	}
+
 	return out, nil
+}
+
+func (sb simpleBlock) Start(ctx context.Context, prefetch []uint64) (map[uint64][]byte, error) {
+	keys, conversion := sb.convertToKeys(prefetch)
+
+	data, err := sb.base.Start(ctx, keys)
+	if err != nil {
+		return nil, err
+	}
+
+	return sb.convertToOutput(conversion, data)
+}
+
+func (sb simpleBlock) Get(ctx context.Context, ptr uint64) ([]byte, error) {
+	return sb.base.Get(ctx, fmt.Sprintf("%x", ptr))
+}
+
+func (sb simpleBlock) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]byte, error) {
+	keys, conversion := sb.convertToKeys(ptrs)
+
+	data, err := sb.base.GetMany(ctx, keys)
+	if err != nil {
+		return nil, err
+	}
+
+	return sb.convertToOutput(conversion, data)
 }
 
 func (sb simpleBlock) Set(ctx context.Context, ptr uint64, data []byte, dt DataType) error {
@@ -67,7 +87,9 @@ type blockMemory map[uint64][]byte
 // data in-memory.
 func NewBlockMemory() BlockStorage { return make(blockMemory) }
 
-func (bm blockMemory) Start(ctx context.Context) error { return nil }
+func (bm blockMemory) Start(ctx context.Context, prefetch []uint64) (map[uint64][]byte, error) {
+	return bm.GetMany(ctx, prefetch)
+}
 
 func (bm blockMemory) Get(ctx context.Context, ptr uint64) ([]byte, error) {
 	d, ok := bm[ptr]
