@@ -57,8 +57,10 @@ func (nd *node) ReadAt(p []byte, offset int64) (int, error) {
 		return 0, err
 	}
 
-	if _, err := nd.data.Seek(offset, io.SeekStart); err != nil {
-		return 0, err
+	if nd.data.pos != offset {
+		if _, err := nd.data.Seek(offset, io.SeekStart); err != nil {
+			return 0, err
+		}
 	}
 	return nd.data.Read(p)
 }
