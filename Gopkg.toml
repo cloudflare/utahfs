@@ -3,10 +3,6 @@
   version = "1.20.20"
 
 [[constraint]]
-  name = "github.com/hashicorp/golang-lru"
-  version = "0.5.1"
-
-[[constraint]]
   branch = "master"
   name = "github.com/jacobsa/fuse"
 

@@ -150,10 +150,7 @@ func (c *Client) localStorage() (persistent.ReliableStorage, error) {
 		c.MemCacheSize = 32 * 1024
 	}
 	if c.MemCacheSize != -1 {
-		relStore, err = persistent.NewCache(relStore, c.MemCacheSize)
-		if err != nil {
-			return nil, err
-		}
+		relStore = persistent.NewCache(relStore, c.MemCacheSize)
 	}
 
 	return relStore, nil
@@ -314,10 +311,7 @@ func (s *Server) Server() (*http.Server, error) {
 		s.MemCacheSize = 32 * 1024
 	}
 	if s.MemCacheSize != -1 {
-		relStore, err = persistent.NewCache(relStore, s.MemCacheSize)
-		if err != nil {
-			return nil, err
-		}
+		relStore = persistent.NewCache(relStore, s.MemCacheSize)
 	}
 
 	// Setup the server we want to expose.

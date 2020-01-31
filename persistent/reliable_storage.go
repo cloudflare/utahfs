@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 
-	"github.com/hashicorp/golang-lru"
+	"code.cfops.it/~brendan/utahfs/cache"
 )
 
 type simpleReliable struct {
@@ -48,22 +48,21 @@ func (sr *simpleReliable) Commit(ctx context.Context, writes map[string]WriteDat
 	return nil
 }
 
-type cache struct {
+type cacheStorage struct {
 	base  ReliableStorage
-	cache *lru.TwoQueueCache
+	cache *cache.Cache
 }
 
 // NewCache wraps a base object storage backend with an LRU cache of the
 // requested size.
-func NewCache(base ReliableStorage, size int) (ReliableStorage, error) {
-	c, err := lru.New2Q(size)
-	if err != nil {
-		return nil, err
+func NewCache(base ReliableStorage, size int) ReliableStorage {
+	return &cacheStorage{
+		base:  base,
+		cache: cache.New(cache.NoExpiration, 0, size),
 	}
-	return &cache{base, c}, nil
 }
 
-func (c *cache) filterCached(keys []string) (out map[string][]byte, remaining []string) {
+func (c *cacheStorage) filterCached(keys []string) (out map[string][]byte, remaining []string) {
 	out = make(map[string][]byte)
 	remaining = make([]string, 0)
 
@@ -79,14 +78,14 @@ func (c *cache) filterCached(keys []string) (out map[string][]byte, remaining []
 	return
 }
 
-func (c *cache) cacheAndOutput(data, out map[string][]byte) {
+func (c *cacheStorage) cacheAndOutput(data, out map[string][]byte) {
 	for key, val := range data {
 		out[key] = val
-		c.cache.Add(key, dup(val))
+		c.cache.Set(key, dup(val), cache.NoExpiration)
 	}
 }
 
-func (c *cache) Start(ctx context.Context, prefetch []string) (map[string][]byte, error) {
+func (c *cacheStorage) Start(ctx context.Context, prefetch []string) (map[string][]byte, error) {
 	out, remaining := c.filterCached(prefetch)
 
 	data, err := c.base.Start(ctx, remaining)
@@ -98,7 +97,7 @@ func (c *cache) Start(ctx context.Context, prefetch []string) (map[string][]byte
 	return out, nil
 }
 
-func (c *cache) Get(ctx context.Context, key string) ([]byte, error) {
+func (c *cacheStorage) Get(ctx context.Context, key string) ([]byte, error) {
 	data, err := c.GetMany(ctx, []string{key})
 	if err != nil {
 		return nil, err
@@ -108,7 +107,7 @@ func (c *cache) Get(ctx context.Context, key string) ([]byte, error) {
 	return data[key], nil
 }
 
-func (c *cache) GetMany(ctx context.Context, keys []string) (map[string][]byte, error) {
+func (c *cacheStorage) GetMany(ctx context.Context, keys []string) (map[string][]byte, error) {
 	out, remaining := c.filterCached(keys)
 
 	if len(remaining) > 0 {
@@ -122,12 +121,12 @@ func (c *cache) GetMany(ctx context.Context, keys []string) (map[string][]byte, 
 	return out, nil
 }
 
-func (c *cache) skip(key string, data []byte) bool {
+func (c *cacheStorage) skip(key string, data []byte) bool {
 	cand, ok := c.cache.Get(key)
 	return ok && bytes.Equal(cand.([]byte), data)
 }
 
-func (c *cache) Commit(ctx context.Context, writes map[string]WriteData) error {
+func (c *cacheStorage) Commit(ctx context.Context, writes map[string]WriteData) error {
 	dedupedWrites := make(map[string]WriteData)
 	for key, wr := range writes {
 		if c.skip(key, wr.Data) {
@@ -142,9 +141,9 @@ func (c *cache) Commit(ctx context.Context, writes map[string]WriteData) error {
 
 	for key, wr := range dedupedWrites {
 		if wr.Data == nil {
-			c.cache.Remove(key)
+			c.cache.Delete(key)
 		} else {
-			c.cache.Add(key, dup(wr.Data))
+			c.cache.Set(key, dup(wr.Data), cache.NoExpiration)
 		}
 	}
 	return nil

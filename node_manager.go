@@ -7,9 +7,9 @@ import (
 	"os"
 	"time"
 
+	"code.cfops.it/~brendan/utahfs/cache"
 	"code.cfops.it/~brendan/utahfs/persistent"
 
-	"github.com/hashicorp/golang-lru"
 	"github.com/jacobsa/fuse/fuseops"
 	"github.com/jacobsa/fuse/fuseutil"
 )
@@ -179,23 +179,19 @@ func (nd *node) Persist() error {
 // links to children, and the rest is the node's raw data.
 type nodeManager struct {
 	bfs   *BlockFilesystem
-	cache *lru.Cache
+	cache *cache.Cache
 
 	uid, gid uint32
 }
 
-func newNodeManager(bfs *BlockFilesystem, cacheSize int, uid, gid uint32) (*nodeManager, error) {
-	cache, err := lru.New(cacheSize)
-	if err != nil {
-		return nil, err
-	}
+func newNodeManager(bfs *BlockFilesystem, cacheSize int, uid, gid uint32) *nodeManager {
 	return &nodeManager{
 		bfs:   bfs,
-		cache: cache,
+		cache: cache.New(30*time.Second, 5*time.Second, cacheSize),
 
 		uid: uid,
 		gid: gid,
-	}, nil
+	}
 }
 
 func (nm *nodeManager) Start(ctx context.Context) error  { return nm.bfs.store.Start(ctx) }
@@ -261,7 +257,7 @@ func (nm *nodeManager) Open(ctx context.Context, ptr uint64) (*node, error) {
 	nd.Attrs.Uid = nm.uid
 	nd.Attrs.Gid = nm.gid
 
-	nm.cache.Add(ptr, nd)
+	nm.cache.Set(ptr, nd, cache.DefaultExpiration)
 	return nd, nil
 }
 
@@ -278,5 +274,5 @@ func (nm *nodeManager) Unlink(ctx context.Context, ptr uint64) error {
 }
 
 func (nm *nodeManager) Forget(nd *node) {
-	nm.cache.Remove(nd.self.start)
+	nm.cache.Delete(nd.self.start)
 }

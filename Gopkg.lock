@@ -78,17 +78,6 @@
   revision = "eaceba16903255cb149d1efc316f6cc83d765268"
 
 [[projects]]
-  digest = "1:d15ee511aa0f56baacc1eb4c6b922fa1c03b38413b6be18166b996d82a0156ea"
-  name = "github.com/hashicorp/golang-lru"
-  packages = [
-    ".",
-    "simplelru",
-  ]
-  pruneopts = "UT"
-  revision = "7087cb70de9f7a8bc0a10c375cb0d2280a8edf9c"
-  version = "v0.5.1"
-
-[[projects]]
   branch = "master"
   digest = "1:c19183ee1bc01433c61d026972e83a479816ffb00f29c8d7605b0668d4bdea8c"
   name = "github.com/jacobsa/fuse"
@@ -228,7 +217,6 @@
     "github.com/aws/aws-sdk-go/aws/credentials",
     "github.com/aws/aws-sdk-go/aws/session",
     "github.com/aws/aws-sdk-go/service/s3",
-    "github.com/hashicorp/golang-lru",
     "github.com/jacobsa/fuse",
     "github.com/jacobsa/fuse/fuseops",
     "github.com/jacobsa/fuse/fuseutil",

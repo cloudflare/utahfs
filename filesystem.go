@@ -97,10 +97,8 @@ func NewFilesystem(bfs *BlockFilesystem) (fuseutil.FileSystem, error) {
 	if err != nil {
 		return nil, err
 	}
-	nm, err := newNodeManager(bfs, 128, uid, gid)
-	if err != nil {
-		return nil, err
-	} else if err := nm.Start(ctx); err != nil {
+	nm := newNodeManager(bfs, 128, uid, gid)
+	if err := nm.Start(ctx); err != nil {
 		return nil, err
 	}
 	defer nm.Rollback(ctx)
