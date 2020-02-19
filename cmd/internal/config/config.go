@@ -214,10 +214,7 @@ func (c *Client) FS(mountPath string) (*utahfs.BlockFilesystem, error) {
 	if err != nil {
 		return nil, err
 	}
-	block, err = persistent.WithEncryption(block, c.Password)
-	if err != nil {
-		return nil, err
-	}
+	block = persistent.WithEncryption(block, c.Password)
 
 	// Setup application storage.
 	appStore := persistent.NewAppStorage(block)

@@ -5,24 +5,43 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"crypto/sha1"
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
+	"io"
 
-	"golang.org/x/crypto/pbkdf2"
+	"golang.org/x/crypto/argon2"
+	"golang.org/x/crypto/hkdf"
 )
 
 type encryption struct {
 	base BlockStorage
-	aead cipher.AEAD
+	key  []byte
 }
 
 // WithEncryption wraps a BlockStorage implementation and makes sure that all
 // values are encrypted with AES-GCM before being processed further.
 //
-// The encryption key is derived with PBKDF2 from `password`.
-func WithEncryption(base BlockStorage, password string) (BlockStorage, error) {
-	key := pbkdf2.Key([]byte(password), []byte("7fedd6d671beec56"), 4096, 32, sha1.New)
+// The encryption key is derived with Argon2 from `password`.
+func WithEncryption(base BlockStorage, password string) BlockStorage {
+	key := argon2.IDKey([]byte(password), []byte("7fedd6d671beec56"), 1, 64*1024, 4, 32)
 
+	return &encryption{base, key}
+}
+
+func (e *encryption) encrypt(ptr uint64, data []byte) ([]byte, error) {
+	tag := make([]byte, binary.MaxVarintLen64)
+	n := binary.PutUvarint(tag, ptr)
+	tag = tag[:n]
+
+	// Compute the encryption key for this block.
+	key := make([]byte, 32)
+	_, err := io.ReadFull(hkdf.Expand(sha256.New, e.key, tag), key)
+	if err != nil {
+		return nil, err
+	}
+
+	// Initialize the AEAD.
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -32,7 +51,49 @@ func WithEncryption(base BlockStorage, password string) (BlockStorage, error) {
 		return nil, err
 	}
 
-	return &encryption{base, aead}, nil
+	// Generate a fresh nonce and encrypt the given data.
+	nonce := make([]byte, aead.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, err
+	}
+	ct := aead.Seal(nil, nonce, data, tag)
+
+	return append(nonce, ct...), nil
+}
+
+func (e *encryption) decrypt(ptr uint64, raw []byte) ([]byte, error) {
+	tag := make([]byte, binary.MaxVarintLen64)
+	n := binary.PutUvarint(tag, ptr)
+	tag = tag[:n]
+
+	// Compute the encryption key for this block.
+	key := make([]byte, 32)
+	_, err := io.ReadFull(hkdf.Expand(sha256.New, e.key, tag), key)
+	if err != nil {
+		return nil, err
+	}
+
+	// Initialize the AEAD.
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+
+	// Decrypt the given data.
+	ns := aead.NonceSize()
+	if len(raw) < ns {
+		return nil, fmt.Errorf("storage: ciphertext is too small")
+	}
+	val, err := aead.Open(nil, raw[:ns], raw[ns:], tag)
+	if err != nil {
+		return nil, err
+	}
+
+	return val, nil
 }
 
 func (e *encryption) Start(ctx context.Context, prefetch []uint64) (map[uint64][]byte, error) {
@@ -58,13 +119,9 @@ func (e *encryption) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]b
 		return nil, err
 	}
 
-	ns := e.aead.NonceSize()
 	out := make(map[uint64][]byte)
 	for ptr, raw := range data {
-		if len(raw) < ns {
-			return nil, fmt.Errorf("storage: ciphertext is too small")
-		}
-		val, err := e.aead.Open(nil, raw[:ns], raw[ns:], []byte(fmt.Sprintf("%x", ptr)))
+		val, err := e.decrypt(ptr, raw)
 		if err != nil {
 			return nil, err
 		}
@@ -74,13 +131,11 @@ func (e *encryption) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]b
 }
 
 func (e *encryption) Set(ctx context.Context, ptr uint64, data []byte, dt DataType) error {
-	nonce := make([]byte, e.aead.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
+	ct, err := e.encrypt(ptr, data)
+	if err != nil {
 		return err
 	}
-	ct := e.aead.Seal(nil, nonce, data, []byte(fmt.Sprintf("%x", ptr)))
-
-	return e.base.Set(ctx, ptr, append(nonce, ct...), dt)
+	return e.base.Set(ctx, ptr, ct, dt)
 }
 
 func (e *encryption) Commit(ctx context.Context) error { return e.base.Commit(ctx) }
