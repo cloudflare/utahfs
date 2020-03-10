@@ -172,9 +172,12 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:35ce874cf16f78a2da908ab28b0277497e36603d289db00d39da5200bc8ace08"
+  digest = "1:9febad105aad8833b77cbc321da08f3b7b7f3c0f7682763b52a0f69725cfbd22"
   name = "golang.org/x/crypto"
   packages = [
+    "argon2",
+    "blake2b",
+    "hkdf",
     "pbkdf2",
     "ssh/terminal",
   ]
@@ -183,9 +186,10 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:31d44814b45607afa77c6e8ef20ea8bacc1d1053fe084440c874f311732e7ec3"
+  digest = "1:34a0c43f2d706c6292cd418409b68ae23657c8a5e960ab97bc199972d4e86d0c"
   name = "golang.org/x/sys"
   packages = [
+    "cpu",
     "unix",
     "windows",
   ]
@@ -223,6 +227,8 @@
     "github.com/mattn/go-sqlite3",
     "github.com/prometheus/client_golang/prometheus",
     "github.com/prometheus/client_golang/prometheus/promhttp",
+    "golang.org/x/crypto/argon2",
+    "golang.org/x/crypto/hkdf",
     "golang.org/x/crypto/pbkdf2",
     "golang.org/x/crypto/ssh/terminal",
     "gopkg.in/kothar/go-backblaze.v0",
