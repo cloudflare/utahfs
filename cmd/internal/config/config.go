@@ -26,6 +26,8 @@ type StorageProvider struct {
 	S3Url    string `yaml:"s3-url"`
 	S3Region string `yaml:"s3-region"`
 
+	GCSBucketName string `yaml:"gcs-bucket-name"`
+
 	Retry int `yaml:"retry"` // Max number of times to retry reqs that fail.
 }
 
@@ -37,14 +39,32 @@ func (sp *StorageProvider) hasS3() bool {
 	return sp.S3AppId != "" || sp.S3AppKey != "" || sp.S3Bucket != "" || sp.S3Url != "" || sp.S3Region != ""
 }
 
+func (sp *StorageProvider) hasGCS() bool {
+	return sp.GCSBucketName != ""
+}
+
+func (sp *StorageProvider) hasMultiple() bool {
+	count := 0
+	if sp.hasB2() {
+		count++
+	}
+	if sp.hasS3() {
+		count++
+	}
+	if sp.hasGCS() {
+		count++
+	}
+	return count > 1
+}
+
 func (sp *StorageProvider) Store() (persistent.ObjectStorage, error) {
-	if sp == nil || !sp.hasB2() && !sp.hasS3() {
+	if sp == nil || !sp.hasB2() && !sp.hasS3() && !sp.hasGCS() {
 		return nil, fmt.Errorf("no object storage provider defined")
-	} else if sp.hasB2() && sp.hasS3() {
+	} else if sp.hasMultiple() {
 		return nil, fmt.Errorf("only one object storage provider may be defined")
 	}
 
-	// Connect to either B2 or S3.
+	// Connect to the user's chosen storage provider.
 	var (
 		out persistent.ObjectStorage
 		err error
@@ -53,6 +73,8 @@ func (sp *StorageProvider) Store() (persistent.ObjectStorage, error) {
 		out, err = persistent.NewB2(sp.B2AcctId, sp.B2AppKey, sp.B2Bucket, sp.B2Url)
 	} else if sp.hasS3() {
 		out, err = persistent.NewS3(sp.S3AppId, sp.S3AppKey, sp.S3Bucket, sp.S3Url, sp.S3Region)
+	} else if sp.hasGCS() {
+		out, err = persistent.NewGCS(sp.GCSBucketName)
 	}
 	if err != nil {
 		return nil, err
