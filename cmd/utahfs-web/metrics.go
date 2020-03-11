@@ -17,6 +17,7 @@ func init() {
 	prometheus.MustRegister(persistent.LocalWALSize)
 	prometheus.MustRegister(persistent.DiskCacheSize)
 	prometheus.MustRegister(persistent.B2Ops)
+	prometheus.MustRegister(persistent.GCSOps)
 	prometheus.MustRegister(persistent.S3Ops)
 }
 
