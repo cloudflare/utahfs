@@ -93,9 +93,10 @@ type diskCache struct {
 	mu    sync.Mutex
 	mapMu MapMutex
 
-	base ObjectStorage
-	size int
-	loc  string
+	base    ObjectStorage
+	loc     string
+	size    int
+	exclude []DataType
 
 	keys *keysHeap
 	db   *sql.DB
@@ -103,7 +104,7 @@ type diskCache struct {
 
 // NewDiskCache wraps a base object storage backend with a large on-disk LRU
 // cache stored at `loc`.
-func NewDiskCache(base ObjectStorage, loc string, size int) (ObjectStorage, error) {
+func NewDiskCache(base ObjectStorage, loc string, size int, exclude []DataType) (ObjectStorage, error) {
 	if err := os.MkdirAll(path.Dir(loc), 0744); err != nil {
 		return nil, err
 	}
@@ -143,9 +144,10 @@ func NewDiskCache(base ObjectStorage, loc string, size int) (ObjectStorage, erro
 	return &diskCache{
 		mapMu: NewMapMutex(),
 
-		base: base,
-		size: size,
-		loc:  loc,
+		base:    base,
+		loc:     loc,
+		size:    size,
+		exclude: exclude,
 
 		keys: kh,
 		db:   db,
@@ -215,6 +217,14 @@ func (dc *diskCache) Set(ctx context.Context, key string, data []byte, dt DataTy
 		dc.removeFromCache(key)
 		return err
 	}
+
+	// Check if this key has an excluded data type and skip caching if so.
+	for _, cand := range dc.exclude {
+		if dt == cand {
+			return nil
+		}
+	}
+	// Type isn't excluded; good to cache.
 	dc.addToCache(key, data)
 	return nil
 }

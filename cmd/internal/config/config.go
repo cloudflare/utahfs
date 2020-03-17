@@ -103,6 +103,7 @@ type Client struct {
 	MaxWALSize      int              `yaml:"max-wal-size"`    // Max number of blocks to put in WAL before blocking on remote storage. Default: 128*1024 blocks
 	WALParallelism  int              `yaml:"wal-parallelism"` // Number of threads to use when draining the WAL. Default: 1
 	DiskCacheSize   int              `yaml:"disk-cache-size"` // Size of on-disk LRU cache. Default: 3200*1024 blocks, -1 to disable.
+	DiskCacheDir    string           `yaml:"disk-cache-dir"`  // Special location for on-disk LRU cache. Default is to store cache inside data-dir.
 	MemCacheSize    int              `yaml:"mem-cache-size"`  // Size of in-memory LRU cache. Default: 32*1024 blocks, -1 to disable.
 	KeepMetadata    bool             `yaml:"keep-metadata"`   // Keep a local copy of metadata, always. Default: false.
 
@@ -140,7 +141,15 @@ func (c *Client) localStorage() (persistent.ReliableStorage, error) {
 		c.DiskCacheSize = 3200 * 1024
 	}
 	if c.DiskCacheSize != -1 {
-		store, err = persistent.NewDiskCache(store, path.Join(c.DataDir, "cache"), c.DiskCacheSize)
+		loc := c.DiskCacheDir
+		if loc == "" {
+			loc = path.Join(c.DataDir, "cache")
+		}
+		exclude := []persistent.DataType{persistent.Unknown}
+		if c.KeepMetadata {
+			exclude = append(exclude, persistent.Metadata)
+		}
+		store, err = persistent.NewDiskCache(store, loc, c.DiskCacheSize, exclude)
 		if err != nil {
 			return nil, err
 		}
@@ -261,11 +270,12 @@ type Server struct {
 
 	StorageProvider *StorageProvider `yaml:"storage-provider"`
 
-	MaxWALSize     int  `yaml:"max-wal-size"`    // Max number of blocks to put in WAL before blocking on remote storage. Default: 320*1024 blocks
-	WALParallelism int  `yaml:"wal-parallelism"` // Number of threads to use when draining the WAL. Default: 1
-	DiskCacheSize  int  `yaml:"disk-cache-size"` // Size of on-disk LRU cache. Default: 3200*1024 blocks, -1 to disable.
-	MemCacheSize   int  `yaml:"mem-cache-size"`  // Size of in-memory LRU cache. Default: 32*1024 blocks, -1 to disable.
-	KeepMetadata   bool `yaml:"keep-metadata"`   // Keep a local copy of metadata, always. Default: false.
+	MaxWALSize     int    `yaml:"max-wal-size"`    // Max number of blocks to put in WAL before blocking on remote storage. Default: 320*1024 blocks
+	WALParallelism int    `yaml:"wal-parallelism"` // Number of threads to use when draining the WAL. Default: 1
+	DiskCacheSize  int    `yaml:"disk-cache-size"` // Size of on-disk LRU cache. Default: 3200*1024 blocks, -1 to disable.
+	DiskCacheDir   string `yaml:"disk-cache-dir"`  // Special location for on-disk LRU cache. Default is to store cache inside data-dir.
+	MemCacheSize   int    `yaml:"mem-cache-size"`  // Size of in-memory LRU cache. Default: 32*1024 blocks, -1 to disable.
+	KeepMetadata   bool   `yaml:"keep-metadata"`   // Keep a local copy of metadata, always. Default: false.
 
 	TransportKey string `yaml:"transport-key"` // Pre-shared key for authenticating client and server.
 }
@@ -298,7 +308,15 @@ func (s *Server) Server() (*http.Server, error) {
 		s.DiskCacheSize = 3200 * 1024
 	}
 	if s.DiskCacheSize != -1 {
-		store, err = persistent.NewDiskCache(store, path.Join(s.DataDir, "cache"), s.DiskCacheSize)
+		loc := s.DiskCacheDir
+		if loc == "" {
+			loc = path.Join(s.DataDir, "cache")
+		}
+		exclude := []persistent.DataType{persistent.Unknown}
+		if s.KeepMetadata {
+			exclude = append(exclude, persistent.Metadata)
+		}
+		store, err = persistent.NewDiskCache(store, loc, s.DiskCacheSize, exclude)
 		if err != nil {
 			return nil, err
 		}
