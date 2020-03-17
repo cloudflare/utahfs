@@ -40,15 +40,14 @@ var (
 )
 
 type b2 struct {
-	conn   *backblaze.B2
-	bucket string
+	bucket *backblaze.Bucket
 	url    string
 }
 
 // NewB2 returns object storage backed by Backblaze B2. `acctId` and `appKey`
-// are the Account ID and Application Key of a B2 bucket. `bucket` is the name
-// of the bucket. `url` is the URL to use to download data.
-func NewB2(acctId, appKey, bucket, url string) (ObjectStorage, error) {
+// are the Account ID and Application Key of a B2 bucket. `bucketName` is the
+// name of the bucket. `url` is the URL to use to download data.
+func NewB2(acctId, appKey, bucketName, url string) (ObjectStorage, error) {
 	conn, err := backblaze.NewB2(backblaze.Credentials{
 		AccountID:      acctId,
 		ApplicationKey: appKey,
@@ -56,7 +55,11 @@ func NewB2(acctId, appKey, bucket, url string) (ObjectStorage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &b2{conn, bucket, url}, nil
+	bucket, err := conn.Bucket(bucketName)
+	if err != nil {
+		return nil, err
+	}
+	return &b2{bucket, url}, nil
 }
 
 func (b *b2) Get(ctx context.Context, key string) ([]byte, error) {
@@ -93,11 +96,7 @@ func (b *b2) Set(ctx context.Context, key string, data []byte, _ DataType) error
 	meta := make(map[string]string)
 	buff := bytes.NewBuffer(data)
 
-	bucket, err := b.conn.Bucket(b.bucket)
-	if err != nil {
-		B2Ops.WithLabelValues("set", "false").Inc()
-		return err
-	} else if _, err := bucket.UploadFile(key, meta, buff); err != nil {
+	if _, err := b.bucket.UploadFile(key, meta, buff); err != nil {
 		B2Ops.WithLabelValues("set", "false").Inc()
 		return err
 	}
@@ -107,11 +106,7 @@ func (b *b2) Set(ctx context.Context, key string, data []byte, _ DataType) error
 }
 
 func (b *b2) Delete(ctx context.Context, key string) error {
-	bucket, err := b.conn.Bucket(b.bucket)
-	if err != nil {
-		B2Ops.WithLabelValues("delete", "false").Inc()
-		return err
-	} else if _, err := bucket.HideFile(key); err != nil {
+	if _, err := b.bucket.HideFile(key); err != nil {
 		B2Ops.WithLabelValues("delete", "false").Inc()
 		return err
 	}

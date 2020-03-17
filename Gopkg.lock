@@ -510,7 +510,7 @@
   name = "gopkg.in/kothar/go-backblaze.v0"
   packages = ["."]
   pruneopts = "UT"
-  revision = "702d4e7eb465dc61b7e320d649f2250d880af512"
+  revision = "7594ed38700f5ca3fc7da8f8c7b91b0526ee66f2"
 
 [[projects]]
   digest = "1:4d2e5a73dc1500038e504a8d78b986630e3626dc027bc030ba5c75da257cdb96"
