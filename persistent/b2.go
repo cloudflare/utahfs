@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -40,26 +41,31 @@ var (
 )
 
 type b2 struct {
-	bucket *backblaze.Bucket
-	url    string
+	pool *sync.Pool
+	url  string
 }
 
 // NewB2 returns object storage backed by Backblaze B2. `acctId` and `appKey`
 // are the Account ID and Application Key of a B2 bucket. `bucketName` is the
 // name of the bucket. `url` is the URL to use to download data.
 func NewB2(acctId, appKey, bucketName, url string) (ObjectStorage, error) {
-	conn, err := backblaze.NewB2(backblaze.Credentials{
-		AccountID:      acctId,
-		ApplicationKey: appKey,
-	})
-	if err != nil {
-		return nil, err
+	pool := &sync.Pool{
+		New: func() interface{} {
+			conn, err := backblaze.NewB2(backblaze.Credentials{
+				AccountID:      acctId,
+				ApplicationKey: appKey,
+			})
+			if err != nil {
+				return err
+			}
+			bucket, err := conn.Bucket(bucketName)
+			if err != nil {
+				return err
+			}
+			return bucket
+		},
 	}
-	bucket, err := conn.Bucket(bucketName)
-	if err != nil {
-		return nil, err
-	}
-	return &b2{bucket, url}, nil
+	return &b2{pool, url}, nil
 }
 
 func (b *b2) Get(ctx context.Context, key string) ([]byte, error) {
@@ -93,10 +99,17 @@ func (b *b2) Get(ctx context.Context, key string) ([]byte, error) {
 }
 
 func (b *b2) Set(ctx context.Context, key string, data []byte, _ DataType) error {
-	meta := make(map[string]string)
-	buff := bytes.NewBuffer(data)
+	bucket := b.pool.Get()
+	if err, ok := bucket.(error); ok {
+		return err
+	}
+	defer b.pool.Put(bucket)
 
-	if _, err := b.bucket.UploadFile(key, meta, buff); err != nil {
+	meta := make(map[string]string)
+	buff := bytes.NewReader(data)
+
+	_, err := bucket.(*backblaze.Bucket).UploadTypedFile(key, "application/octet-string", meta, buff)
+	if err != nil {
 		B2Ops.WithLabelValues("set", "false").Inc()
 		return err
 	}
@@ -106,7 +119,13 @@ func (b *b2) Set(ctx context.Context, key string, data []byte, _ DataType) error
 }
 
 func (b *b2) Delete(ctx context.Context, key string) error {
-	if _, err := b.bucket.HideFile(key); err != nil {
+	bucket := b.pool.Get()
+	if err, ok := bucket.(error); ok {
+		return err
+	}
+	defer b.pool.Put(bucket)
+
+	if _, err := bucket.(*backblaze.Bucket).HideFile(key); err != nil {
 		B2Ops.WithLabelValues("delete", "false").Inc()
 		return err
 	}
