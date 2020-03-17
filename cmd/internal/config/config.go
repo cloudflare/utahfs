@@ -103,7 +103,7 @@ type Client struct {
 	MaxWALSize      int              `yaml:"max-wal-size"`    // Max number of blocks to put in WAL before blocking on remote storage. Default: 128*1024 blocks
 	WALParallelism  int              `yaml:"wal-parallelism"` // Number of threads to use when draining the WAL. Default: 1
 	DiskCacheSize   int              `yaml:"disk-cache-size"` // Size of on-disk LRU cache. Default: 3200*1024 blocks, -1 to disable.
-	DiskCacheDir    string           `yaml:"disk-cache-dir"`  // Special location for on-disk LRU cache. Default is to store cache inside data-dir.
+	DiskCacheLoc    string           `yaml:"disk-cache-loc"`  // Special location for on-disk LRU cache. Default is to store cache inside data-dir.
 	MemCacheSize    int              `yaml:"mem-cache-size"`  // Size of in-memory LRU cache. Default: 32*1024 blocks, -1 to disable.
 	KeepMetadata    bool             `yaml:"keep-metadata"`   // Keep a local copy of metadata, always. Default: false.
 
@@ -141,7 +141,7 @@ func (c *Client) localStorage() (persistent.ReliableStorage, error) {
 		c.DiskCacheSize = 3200 * 1024
 	}
 	if c.DiskCacheSize != -1 {
-		loc := c.DiskCacheDir
+		loc := c.DiskCacheLoc
 		if loc == "" {
 			loc = path.Join(c.DataDir, "cache")
 		}
@@ -273,7 +273,7 @@ type Server struct {
 	MaxWALSize     int    `yaml:"max-wal-size"`    // Max number of blocks to put in WAL before blocking on remote storage. Default: 320*1024 blocks
 	WALParallelism int    `yaml:"wal-parallelism"` // Number of threads to use when draining the WAL. Default: 1
 	DiskCacheSize  int    `yaml:"disk-cache-size"` // Size of on-disk LRU cache. Default: 3200*1024 blocks, -1 to disable.
-	DiskCacheDir   string `yaml:"disk-cache-dir"`  // Special location for on-disk LRU cache. Default is to store cache inside data-dir.
+	DiskCacheLoc   string `yaml:"disk-cache-loc"`  // Special location for on-disk LRU cache. Default is to store cache inside data-dir.
 	MemCacheSize   int    `yaml:"mem-cache-size"`  // Size of in-memory LRU cache. Default: 32*1024 blocks, -1 to disable.
 	KeepMetadata   bool   `yaml:"keep-metadata"`   // Keep a local copy of metadata, always. Default: false.
 
@@ -308,7 +308,7 @@ func (s *Server) Server() (*http.Server, error) {
 		s.DiskCacheSize = 3200 * 1024
 	}
 	if s.DiskCacheSize != -1 {
-		loc := s.DiskCacheDir
+		loc := s.DiskCacheLoc
 		if loc == "" {
 			loc = path.Join(s.DataDir, "cache")
 		}
