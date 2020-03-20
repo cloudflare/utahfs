@@ -1,13 +1,13 @@
 UtahFS
 ======
 
-UtahFS is a state-of-the art encrypted storage solution that is meant to be
-similar to Dropbox. It has a FUSE binding that creates a synthetic drive on the
-user's computer that they can interact with like an external hard-drive. Files
-stored in the drive are uploaded to a cloud storage provider, which means the
-drive will never run out of space and minimizes the likelihood of any files
-being lost. However the files are encrypted such that the cloud storage provider
-knows almost nothing about what's being stored.
+UtahFS is a state-of-the art encrypted storage solution, meant to be similar to
+Dropbox. It has a FUSE binding that creates a synthetic drive on the user's
+computer that they can interact with like an external hard-drive. Files stored
+in the drive are uploaded to a cloud storage provider, which means the drive
+will never run out of space and minimizes the likelihood of any files being
+lost. However the files are encrypted such that the cloud storage provider knows
+almost nothing about what's being stored.
 
 
 Features
@@ -15,7 +15,7 @@ Features
 
 1. **Interchangeable Storage Providers.** For storing data in the cloud, UtahFS
    uses *Object Storage*, which is cheap and commodified. Example providers
-   include: AWS S3, Backblaze B2, and Wasabi.
+   include: AWS S3, Google Cloud Storage, Backblaze B2, and Wasabi.
 2. **Very Very Strong Encryption.** The method of encryption hides the number of
    files, file names, file contents, individual file size, and prevents any
    modifications (including rollbacks!). The only information which is clearly
