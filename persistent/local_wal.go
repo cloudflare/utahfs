@@ -53,7 +53,11 @@ func NewLocalWAL(base ObjectStorage, loc string, maxSize, parallelism int) (Reli
 	if err != nil {
 		return nil, err
 	}
-	_, err = local.Exec(`CREATE TABLE IF NOT EXISTS wal (id integer not null primary key, key text, val bytea, dt integer); CREATE INDEX IF NOT EXISTS by_key ON wal(key);`)
+	_, err = local.Exec("CREATE TABLE IF NOT EXISTS wal (id integer not null primary key, key text, val bytea, dt integer)")
+	if err != nil {
+		return nil, err
+	}
+	_, err = local.Exec("CREATE INDEX IF NOT EXISTS by_key ON wal(key)")
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +137,7 @@ func (lw *localWAL) drainOnce() error {
 			vals [][]byte
 			dts  []DataType
 		)
-		rows, err := lw.local.Query("SELECT id, key, val, dt FROM wal LIMIT 100;")
+		rows, err := lw.local.Query("SELECT id, key, val, dt FROM wal LIMIT 100")
 		if err != nil {
 			return err
 		}
@@ -194,7 +198,7 @@ func (lw *localWAL) count() (int, error) {
 	lw.mu.Unlock()
 
 	var count int
-	err := lw.local.QueryRow("SELECT COUNT(*) FROM wal;").Scan(&count)
+	err := lw.local.QueryRow("SELECT COUNT(*) FROM wal").Scan(&count)
 	if err != nil {
 		return 0, err
 	}
@@ -234,7 +238,7 @@ func (lw *localWAL) Start(ctx context.Context, prefetch []string) (map[string][]
 
 func (lw *localWAL) Get(ctx context.Context, key string) ([]byte, error) {
 	var val []byte
-	err := lw.local.QueryRow("SELECT val FROM wal WHERE key = ?;", key).Scan(&val)
+	err := lw.local.QueryRowContext(ctx, "SELECT val FROM wal WHERE key = ?", key).Scan(&val)
 	if err == sql.ErrNoRows {
 		return lw.base.Get(ctx, key)
 	} else if len(val) == 0 {
@@ -264,16 +268,16 @@ func (lw *localWAL) Commit(ctx context.Context, writes map[string]WriteData) err
 		return nil
 	}
 
-	tx, err := lw.local.Begin()
+	tx, err := lw.local.BeginTx(ctx)
 	if err != nil {
 		return err
 	}
-	delStmt, err := tx.Prepare("DELETE FROM wal WHERE key = ?;")
+	delStmt, err := tx.Prepare("DELETE FROM wal WHERE key = ?")
 	if err != nil {
 		tx.Rollback()
 		return err
 	}
-	insertStmt, err := tx.Prepare("INSERT INTO wal (key, val, dt) VALUES (?, ?, ?);")
+	insertStmt, err := tx.Prepare("INSERT INTO wal (key, val, dt) VALUES (?, ?, ?)")
 	if err != nil {
 		tx.Rollback()
 		return err

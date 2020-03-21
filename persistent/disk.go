@@ -22,7 +22,7 @@ func NewDisk(loc string) (ObjectStorage, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS db (key text not null primary key, val bytea);`)
+	_, err = db.Exec("CREATE TABLE IF NOT EXISTS db (key text not null primary key, val bytea)")
 	if err != nil {
 		return nil, err
 	}
@@ -32,7 +32,7 @@ func NewDisk(loc string) (ObjectStorage, error) {
 
 func (d *disk) Get(ctx context.Context, key string) ([]byte, error) {
 	var data []byte
-	err := d.db.QueryRow("SELECT val FROM db WHERE key = ?", key).Scan(&data)
+	err := d.db.QueryRowContext(ctx, "SELECT val FROM db WHERE key = ?", key).Scan(&data)
 	if err == sql.ErrNoRows {
 		return nil, ErrObjectNotFound
 	} else if err != nil {
@@ -42,11 +42,11 @@ func (d *disk) Get(ctx context.Context, key string) ([]byte, error) {
 }
 
 func (d *disk) Set(ctx context.Context, key string, data []byte, _ DataType) error {
-	_, err := d.db.Exec("INSERT OR REPLACE INTO db (key, val) VALUES (?, ?)", key, data)
+	_, err := d.db.ExecContext(ctx, "INSERT OR REPLACE INTO db (key, val) VALUES (?, ?)", key, data)
 	return err
 }
 
 func (d *disk) Delete(ctx context.Context, key string) error {
-	_, err := d.db.Exec("DELETE FROM db WHERE key = ?", key)
+	_, err := d.db.ExecContext(ctx, "DELETE FROM db WHERE key = ?", key)
 	return err
 }

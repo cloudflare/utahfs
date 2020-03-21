@@ -112,7 +112,7 @@ func NewDiskCache(base ObjectStorage, loc string, size int, exclude []DataType) 
 	if err != nil {
 		return nil, err
 	}
-	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS cache (key text not null primary key, val bytea);`)
+	_, err = db.Exec("CREATE TABLE IF NOT EXISTS cache (key text not null primary key, val bytea)")
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +120,7 @@ func NewDiskCache(base ObjectStorage, loc string, size int, exclude []DataType) 
 	// List all keys in the cache and build a heap.
 	kh := newKeysHeap(size)
 
-	rows, err := db.Query("SELECT key FROM cache;")
+	rows, err := db.Query("SELECT key FROM cache")
 	if err != nil {
 		return nil, err
 	}
@@ -154,9 +154,9 @@ func NewDiskCache(base ObjectStorage, loc string, size int, exclude []DataType) 
 	}, nil
 }
 
-func (dc *diskCache) addToCache(key string, data []byte) {
+func (dc *diskCache) addToCache(ctx context.Context, key string, data []byte) {
 	// Add this key to the cache.
-	_, err := dc.db.Exec("INSERT OR REPLACE INTO cache (key, val) VALUES (?, ?)", key, data)
+	_, err := dc.db.ExecContext(ctx, "INSERT OR REPLACE INTO cache (key, val) VALUES (?, ?)", key, data)
 	if err != nil {
 		log.Println(err)
 		return
@@ -169,7 +169,7 @@ func (dc *diskCache) addToCache(key string, data []byte) {
 	// Evict from the cache until we're back at/below the target size.
 	for dc.keys.Len() > dc.size {
 		key := heap.Pop(dc.keys).(string)
-		if _, err := dc.db.Exec("DELETE FROM cache WHERE key = ?", key); err != nil {
+		if _, err := dc.db.ExecContext(ctx, "DELETE FROM cache WHERE key = ?", key); err != nil {
 			log.Println(err)
 			return
 		}
@@ -177,11 +177,11 @@ func (dc *diskCache) addToCache(key string, data []byte) {
 	DiskCacheSize.WithLabelValues(dc.loc).Set(float64(dc.keys.Len()))
 }
 
-func (dc *diskCache) removeFromCache(key string) {
+func (dc *diskCache) removeFromCache(ctx context.Context, key string) {
 	dc.mu.Lock()
 	dc.keys.remove(key)
 	dc.mu.Unlock()
-	if _, err := dc.db.Exec("DELETE FROM cache WHERE key = ?", key); err != nil {
+	if _, err := dc.db.ExecContext(ctx, "DELETE FROM cache WHERE key = ?", key); err != nil {
 		log.Println(err)
 	}
 	DiskCacheSize.WithLabelValues(dc.loc).Dec()
@@ -192,13 +192,13 @@ func (dc *diskCache) Get(ctx context.Context, key string) ([]byte, error) {
 	defer dc.mapMu.Unlock(key)
 
 	var data []byte
-	err := dc.db.QueryRow("SELECT val FROM cache WHERE key = ?", key).Scan(&data)
+	err := dc.db.QueryRowContext(ctx, "SELECT val FROM cache WHERE key = ?", key).Scan(&data)
 	if err == sql.ErrNoRows {
 		data, err = dc.base.Get(ctx, key)
 		if err != nil {
 			return nil, err
 		}
-		dc.addToCache(key, data)
+		dc.addToCache(ctx, key, data)
 		return data, nil
 	} else if err != nil {
 		return nil, err
@@ -214,7 +214,7 @@ func (dc *diskCache) Set(ctx context.Context, key string, data []byte, dt DataTy
 	defer dc.mapMu.Unlock(key)
 
 	if err := dc.base.Set(ctx, key, data, dt); err != nil {
-		dc.removeFromCache(key)
+		dc.removeFromCache(ctx, key)
 		return err
 	}
 
@@ -225,7 +225,7 @@ func (dc *diskCache) Set(ctx context.Context, key string, data []byte, dt DataTy
 		}
 	}
 	// Type isn't excluded; good to cache.
-	dc.addToCache(key, data)
+	dc.addToCache(ctx, key, data)
 	return nil
 }
 
@@ -234,6 +234,6 @@ func (dc *diskCache) Delete(ctx context.Context, key string) error {
 	defer dc.mapMu.Unlock(key)
 
 	err := dc.base.Delete(ctx, key)
-	dc.removeFromCache(key)
+	dc.removeFromCache(ctx, key)
 	return err
 }
