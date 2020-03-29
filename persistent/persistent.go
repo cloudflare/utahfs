@@ -72,13 +72,20 @@ type BlockStorage interface {
 	Rollback(ctx context.Context)
 }
 
-func dup(in []byte) []byte {
-	if in == nil {
-		return nil
-	}
-	out := make([]byte, len(in))
-	copy(out, in)
-	return out
+// ObliviousStorage defines the interface an ORAM implementation would use to
+// access and store sensitive data.
+type ObliviousStorage interface {
+	// Start begins a new transaction. It returns the number of blocks and the
+	// current stash.
+	Start(ctx context.Context) (size uint64, stash map[uint64][]byte, err error)
+
+	// Lookup returns a map from each requested pointer, to the leaf that the
+	// pointer is assigned to.
+	Lookup(ctx context.Context, ptr []uint64) (map[uint64]uint64, error)
+
+	// Commit ends the transaction, replacing the stash with the given map and
+	// making the requested pointer-to-leaf assignments.
+	Commit(ctx context.Context, stash map[uint64][]byte, assignments map[uint64]uint64) error
 }
 
 // MapMutex implements the ability to lock and unlock specific keys of a map.
@@ -114,4 +121,59 @@ func (mm MapMutex) Unlock(key interface{}) {
 	mu := temp.(*sync.Mutex)
 	mm.m.Delete(key)
 	mu.Unlock()
+}
+
+func dup(in []byte) []byte {
+	if in == nil {
+		return nil
+	}
+	out := make([]byte, len(in))
+	copy(out, in)
+	return out
+}
+
+// The functions below are all for left-balanced binary tree math. They're taken
+// from the MLS specification.
+
+// log2 returns the exponent of the largest power of 2 less than x.
+func log2(x uint64) uint64 {
+	if x == 0 {
+		return 0
+	}
+
+	var k uint64
+	for (x >> k) > 0 {
+		k += 1
+	}
+	return k - 1
+}
+
+// level returns the level of a node in the tree.
+func level(x uint64) uint64 {
+	if x&1 == 0 {
+		return 0
+	}
+
+	var k uint64
+	for (x>>k)&1 == 1 {
+		k += 1
+	}
+	return k
+}
+
+// treeWidth returns the number of nodes needed to represent a tree with n
+// leaves.
+func treeWidth(n uint64) uint64 { return 2*(n-1) + 1 }
+
+// rootNode returns the index of the root node of a tree with n leaves.
+func rootNode(n uint64) uint64 {
+	w := treeWidth(n)
+	return (1 << log2(w)) - 1
+}
+
+// parentStep returns the immediate parent of a node.
+func parentStep(x uint64) uint64 {
+	k := level(x)
+	b := (x >> (k + 1)) & 1
+	return (x | (1 << k)) ^ (b << (k + 1))
 }

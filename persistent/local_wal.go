@@ -137,11 +137,11 @@ func (lw *localWAL) drainOnce() error {
 			vals [][]byte
 			dts  []DataType
 		)
+
 		rows, err := lw.local.Query("SELECT id, key, val, dt FROM wal LIMIT 100")
 		if err != nil {
 			return err
 		}
-
 		for rows.Next() {
 			var (
 				id  int
@@ -268,7 +268,7 @@ func (lw *localWAL) Commit(ctx context.Context, writes map[string]WriteData) err
 		return nil
 	}
 
-	tx, err := lw.local.BeginTx(ctx)
+	tx, err := lw.local.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
