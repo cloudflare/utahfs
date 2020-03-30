@@ -1,9 +1,12 @@
 package persistent
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"fmt"
+	"io"
 )
 
 const (
@@ -11,9 +14,99 @@ const (
 	blockSize int = 4
 )
 
+func marshalBucket(items map[uint64][]byte, maxSize int64) []byte {
+	if len(items) > blockSize {
+		panic("cannot marshal a bucket that has more than the max number of items")
+	}
+	targetSize := blockSize * (8 + 4 + int(maxSize))
+
+	buff := new(bytes.Buffer)
+	buff.Grow(targetSize)
+
+	for ptr, data := range items {
+		if len(data) > maxSize {
+			panic("data in bucket is larger than max size")
+		}
+
+		if err := binary.Write(buff, binary.LittleEndian, ptr); err != nil { // Pointer.
+			panic(err)
+		}
+		if _, err := binary.Write(buff, binary.LittleEndian, uint32(len(data))); err != nil { // Data length.
+			panic(err)
+		}
+		if _, err := buff.Write(data); err != nil { // Data.
+			panic(err)
+		}
+		if _, err := buff.Write(make([]byte, maxSize-len(data))); err != nil { // Zero padding.
+			panic(err)
+		}
+	}
+	for i := len(items); i < blockSize; i++ {
+		if err := binary.Write(buff, binary.LittleEndian, ^uint64(0)); err != nil { // Null pointer.
+			panic(err)
+		}
+		if _, err := buff.Write(make([]byte, 4+maxSize)); err != nil { // Zero data length + zero padding.
+			panic(err)
+		}
+	}
+
+	if buff.Len() != targetSize {
+		panic("unknown internal error occurred while marshalling block")
+	}
+	return buff.Bytes()
+}
+
+func unmarshalBucket(data []byte, maxSize int64) (map[uint64][]byte, error) {
+	out := make(map[uint64][]byte)
+
+	r := bytes.NewReader(data)
+	for {
+		// Pointer.
+		var ptr uint64
+		if err := binary.Read(r, binary.LittleEndian, &ptr); err == io.EOF {
+			return out, nil
+		} else if err != nil {
+			return nil, err
+		}
+
+		// Data length.
+		var dataLen uint32
+		if err := binary.Read(r, binary.LittleEndian, &dataLen); err == io.EOF {
+			return nil, io.ErrUnexpectedEOF
+		} else if err != nil {
+			return nil, err
+		} else if int64(dataLen) > maxSize {
+			return nil, fmt.Errorf("data in block is larger than max size")
+		}
+
+		// Data.
+		data := make([]byte, dataLen)
+		if _, err := io.ReadFull(r, data); err != nil {
+			return nil, err
+		}
+
+		// Zero padding.
+		padding := make([]byte, maxSize-dataLen)
+		if _, err := io.ReadFull(r, padding); err != nil {
+			return nil, err
+		}
+		for _, b := range padding {
+			if b != 0x00 {
+				return nil, fmt.Errorf("padding bytes were not all zero")
+			}
+		}
+
+		if ptr == ^uint64(0) {
+			continue
+		}
+		out[ptr] = data
+	}
+}
+
 type oblivious struct {
-	base  BlockStorage
-	store *obliviousStore
+	base    BlockStorage
+	store   *obliviousStore
+	maxSize int64
 
 	integ *integrity
 
@@ -25,8 +118,11 @@ type oblivious struct {
 // accessing and whether the user is reading or writing, but not the total
 // amount of accesses or when.
 //
-// A small amount of local data is stored in `loc`.
-func WithORAM(base BlockStorage, store ObliviousStorage) (BlockStorage, error) {
+// A small amount of local data is stored in `store`. `maxSize` is the maximum
+// size of a block of data.
+func WithORAM(base BlockStorage, store ObliviousStorage, maxSize int64) (BlockStorage, error) {
+	// Extract the integrity layer so we have access to the current version of
+	// the corpus.
 	enc, ok := base.(*encryption)
 	if !ok {
 		return nil, fmt.Errorf("oblivious: expected encryption layer as input, but got: %T", base)
@@ -37,8 +133,9 @@ func WithORAM(base BlockStorage, store ObliviousStorage) (BlockStorage, error) {
 	}
 
 	return &oblivious{
-		base:  base,
-		store: newObliviousStore(store),
+		base:    base,
+		store:   newObliviousStore(store),
+		maxSize: maxSize,
 
 		integ: integ,
 	}, nil
@@ -99,7 +196,7 @@ func (o *oblivious) startAccess(ctx context.Context, ptrs []uint64) (map[uint64]
 
 	stash := make(map[uint64][]byte)
 	for id, raw := range data {
-		bucket, err := unmarshalBucket(raw)
+		bucket, err := unmarshalBucket(raw, o.maxSize)
 		if err != nil {
 			return nil, fmt.Errorf("oblivious: failed to parse bucket %v: %v", id, err)
 		}
@@ -115,19 +212,6 @@ func (o *oblivious) startAccess(ctx context.Context, ptrs []uint64) (map[uint64]
 }
 
 func (o *oblivious) finishAccess(ctx context.Context, assignments map[uint64]uint64) error {
-	maxLeaf := big.NewInt(0).SetUint64(o.store.Count)
-
-	newLeafs := make(map[uint64]uint64)
-	for ptr, _ := range currLeafs {
-		// Note that we're only re-assigning the pointers we successfully looked
-		// up. Pointers without a mapping to a leaf are non-existent.
-		n, err := rand.Int(rand.Reader, maxLeaf)
-		if err != nil {
-			return nil, err
-		}
-		newLeafs[ptr] = n.Uint64()
-	}
-
 	// Make a note of all the leaf nodes we accessed. This will be used to help
 	// us construct the blocks.
 	nodes := make(map[uint64]struct{})
@@ -135,8 +219,18 @@ func (o *oblivious) finishAccess(ctx context.Context, assignments map[uint64]uin
 		nodes[2*leaf] = struct{}{}
 	}
 
+	// Assign new leaf nodes to every pointer that was looked up.
+	maxLeaf := big.NewInt(0).SetUint64(o.store.Count)
+	for ptr, _ := range assignments {
+		leaf, err := rand.Int(rand.Reader, maxLeaf)
+		if err != nil {
+			return nil, err
+		}
+		assignments[ptr] = leaf.Uint64()
+	}
+
 	// There's a lot of stuff in the stash unrelated to our query. Lookup the
-	// assigned leafs for all those pointers and merge it into `assignments`.
+	// assigned leafs for all those pointers and merge them into `assignments`.
 	extraPtrs := make([]uint64, 0)
 	for ptr, _ := range o.store.Stash {
 		if _, ok := assignments[ptr]; !ok {
@@ -179,9 +273,10 @@ func (o *oblivious) finishAccess(ctx context.Context, assignments map[uint64]uin
 					}
 				}
 			}
-			if err := o.base.Set(ctx, node, marshalBucket(items)); err != nil {
+			if err := o.base.Set(ctx, node, marshalBucket(items, o.maxSize)); err != nil {
 				return nil, err
 			}
+			o.needsCommit = true
 		}
 
 		// Detect if we just built the root bucket and stop working if so.
@@ -229,6 +324,7 @@ func (o *oblivious) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]by
 
 // func (o *oblivious) Set(ctx context.Context, ptr uint64, data []byte, dt DataType) error {
 // }
-//
-// func (o *oblivious) Commit(ctx context.Context) error { return o.base.Commit(ctx) }
+
+func (o *oblivious) Commit(ctx context.Context) error { return o.base.Commit(ctx) }
+
 // func (o *oblivious) Rollback(ctx context.Context)     { o.base.Rollback(ctx) }
