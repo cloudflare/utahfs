@@ -17,6 +17,8 @@ const (
 func marshalBucket(items map[uint64][]byte, maxSize int64) []byte {
 	if len(items) > blockSize {
 		panic("cannot marshal a bucket that has more than the max number of items")
+	} else if maxSize>>32 != 0 {
+		panic("max data size cannot be larger than 32 bits")
 	}
 	targetSize := blockSize * (8 + 4 + int(maxSize))
 
@@ -51,7 +53,7 @@ func marshalBucket(items map[uint64][]byte, maxSize int64) []byte {
 	}
 
 	if buff.Len() != targetSize {
-		panic("unknown internal error occurred while marshalling block")
+		panic("unknown internal error occurred while marshaling block")
 	}
 	return buff.Bytes()
 }
@@ -110,7 +112,16 @@ type oblivious struct {
 
 	integ *integrity
 
-	needsCommit bool
+	// needRollback is set to true when an error condition has occured while
+	// performing ORAM operations and it's safest to lose some privacy
+	// guarantees and just start over.
+	needRollback bool
+	// originalVals is a map from a pointer to the original value of that
+	// pointer before any Sets were applied.
+	originalVals map[uint64][]byte
+	// rollbackWrites are writes that we should try to apply in the event of a
+	// rollback, assuming there have been no other error conditions.
+	rollbackWrites map[uint64][]byte
 }
 
 // WithORAM wraps a BlockStorage implementation and prevents outsiders from
@@ -146,11 +157,16 @@ func (o *oblivious) Start(ctx context.Context, prefetch []uint64) (map[uint64][]
 		return nil, fmt.Errorf("oblivious: prefetch is not supported")
 	} else if _, err := o.base.Start(ctx, nil); err != nil {
 		return nil, err
-	} else if err := o.store.Start(ctx); err != nil {
+	} else if err := o.store.Start(ctx, o.integ.curr.Version); err != nil {
 		o.base.Rollback(ctx)
 		return nil, err
 	}
-	return nil, err
+
+	o.needRollback = false
+	o.originalVals = make(map[uint64][]byte)
+	o.rollbackWrites = make(map[uint64][]byte)
+
+	return nil, nil
 }
 
 func (o *oblivious) Get(ctx context.Context, ptr uint64) ([]byte, error) {
@@ -259,24 +275,9 @@ func (o *oblivious) finishAccess(ctx context.Context, assignments map[uint64]uin
 		for node, _ := range nodes {
 			if node >= maxNode {
 				continue
-			}
-
-			// Select `blockSize` number of items from the stash assigned to
-			// this node.
-			items := make(map[uint64][]byte)
-			for ptr, cand := range assignments {
-				if node == cand {
-					items[ptr] = o.store.Stash[ptr]
-					delete(o.store.Stash, ptr)
-					if len(items) == blockSize {
-						break
-					}
-				}
-			}
-			if err := o.base.Set(ctx, node, marshalBucket(items, o.maxSize)); err != nil {
+			} else if err := o.buildBucket(node, assignments); err != nil {
 				return nil, err
 			}
-			o.needsCommit = true
 		}
 
 		// Detect if we just built the root bucket and stop working if so.
@@ -299,7 +300,37 @@ func (o *oblivious) finishAccess(ctx context.Context, assignments map[uint64]uin
 	return nil
 }
 
+func (o *oblivious) buildBucket(node uint64, assignments map[uint64]uint64) error {
+	items := make(map[uint64][]byte)
+	itemsRollback := make(map[uint64][]byte)
+
+	// Select at most `blockSize` number of items from the stash assigned to
+	// this node.
+	for ptr, cand := range assignments {
+		if node != cand {
+			continue
+		}
+
+		items[ptr] = o.store.Stash[ptr]
+		delete(o.store.Stash, ptr)
+
+		if orig, ok := o.originalValues[ptr]; ok && orig != nil {
+			itemsRollback[ptr] = orig
+		}
+
+		if len(items) == blockSize {
+			break
+		}
+	}
+
+	o.rollbackWrites[node] = marshalBucket(itemsRollback, o.maxSize)
+	return o.base.Set(ctx, node, marshalBucket(items, o.maxSize))
+}
+
 func (o *oblivious) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]byte, error) {
+	if o.needRollback {
+		return nil, fmt.Errorf("oblivious: an error condition has occured, please rollback")
+	}
 	out := make(map[uint64][]byte)
 	if len(ptrs) == 0 {
 		return out, nil
@@ -307,6 +338,7 @@ func (o *oblivious) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]by
 
 	assignments, err := o.startAccess(ctx, ptrs)
 	if err != nil {
+		o.needRollback = true
 		return nil, err
 	}
 	for _, ptr := range ptrs {
@@ -316,15 +348,75 @@ func (o *oblivious) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]by
 		}
 	}
 	if err := o.finishAccess(ctx, assignments); err != nil {
+		o.needRollback = true
 		return nil, err
 	}
 
 	return out, nil
 }
 
-// func (o *oblivious) Set(ctx context.Context, ptr uint64, data []byte, dt DataType) error {
-// }
+func (o *oblivious) Set(ctx context.Context, ptr uint64, data []byte, dt DataType) error {
+	if o.needRollback {
+		return nil, fmt.Errorf("oblivious: an error condition has occured, please rollback")
+	}
 
-func (o *oblivious) Commit(ctx context.Context) error { return o.base.Commit(ctx) }
+	assignments, err := o.startAccess(ctx, []uint64{ptr})
+	if err != nil {
+		o.needRollback = true
+		return nil, err
+	}
 
-// func (o *oblivious) Rollback(ctx context.Context)     { o.base.Rollback(ctx) }
+	if _, ok := o.originalVals[ptr]; !ok {
+		o.originalVals[ptr] = o.store.Stash[ptr]
+	}
+	o.store.Stash[ptr] = dup(data)
+
+	if err := o.finishAccess(ctx, assignments); err != nil {
+		o.needRollback = true
+		return nil, err
+	}
+
+	return nil
+}
+
+func (o *oblivious) Commit(ctx context.Context) error {
+	if o.needRollback {
+		return nil, fmt.Errorf("oblivious: an error condition has occured, please rollback")
+	}
+
+	if err := o.store.Commit(ctx, o.integ.curr.Version); err != nil {
+		o.base.Rollback()
+		return err
+	}
+	return o.base.Commit(ctx)
+}
+
+func (o *oblivious) Rollback(ctx context.Context) {
+	defer func() {
+		o.originalVals = nil
+		o.rollbackWrites = nil
+	}()
+	if o.needRollback {
+		o.store.Rollback(ctx)
+		o.base.Rollback(ctx)
+		return
+	}
+
+	// When Rollback is called and there haven't been any error conditions, we
+	// actually need to commit. This is because Get requests modify the user's
+	// data and we need to persist those changes to preserve the privacy
+	// guarantees of ORAM. Changes from Set requests are explicitly undone.
+	for node, data := range o.rollbackWrites {
+		if err := o.base.Set(ctx, node, data); err != nil {
+			o.needRollback = true
+			o.Rollback(ctx)
+			return
+		}
+	}
+
+	if err := o.store.Commit(ctx, o.integ.curr.Version); err != nil {
+		o.base.Rollback()
+		return err
+	}
+	return o.base.Commit(ctx)
+}
