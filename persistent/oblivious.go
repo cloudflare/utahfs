@@ -186,6 +186,19 @@ func (o *oblivious) startAccess(ctx context.Context, ptrs []uint64) (map[uint64]
 		return nil, err
 	}
 
+	// Assign random leafs to pointers that don't exist.
+	maxLeaf := big.NewInt(0).SetUint64(o.store.Count)
+	for _, ptr := range ptrs {
+		if _, ok := assignments[ptr]; ok {
+			continue
+		}
+		leaf, err := rand.Int(rand.Reader, maxLeaf)
+		if err != nil {
+			return nil, err
+		}
+		assignments[ptr] = leaf.Uint64()
+	}
+
 	// Compute the buckets/nodes that need to be read.
 	maxNode := treeWidth(o.store.Count)
 	root := rootNode(o.store.Count)
@@ -366,6 +379,9 @@ func (o *oblivious) Set(ctx context.Context, ptr uint64, data []byte, dt DataTyp
 		return nil, err
 	}
 
+	if o.store.Count <= ptr {
+		o.store.Count = ptr + 1
+	}
 	if _, ok := o.originalVals[ptr]; !ok {
 		o.originalVals[ptr] = o.store.Stash[ptr]
 	}
