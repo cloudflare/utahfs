@@ -63,6 +63,7 @@ func testORAMCorrectness(store BlockStorage) func(t *testing.T) {
 				t.Fatal(err)
 			}
 			rollback := mrand.Intn(3) == 2
+			dirty := mrand.Intn(3) == 2
 
 			// Make a series of random writes to store that may or may not be
 			// rolled back.
@@ -82,8 +83,12 @@ func testORAMCorrectness(store BlockStorage) func(t *testing.T) {
 			}
 
 			// Rollback if needed.
-			if rollback { // TODO: Also test partial rollback.
-				store.Rollback(ctx)
+			if rollback {
+				if dirty {
+					store.(*oblivious).dirtyRollback(ctx)
+				} else {
+					store.Rollback(ctx)
+				}
 				continue
 			}
 

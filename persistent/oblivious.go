@@ -339,11 +339,12 @@ func (o *oblivious) buildBucket(ctx context.Context, node uint64, assignments ma
 		}
 
 		items[ptr] = val
-		delete(o.store.Stash, ptr)
-
-		if orig, ok := o.originalVals[ptr]; ok && orig != nil {
+		if orig, ok := o.originalVals[ptr]; ok {
 			itemsRollback[ptr] = orig
+		} else {
+			itemsRollback[ptr] = val
 		}
+		delete(o.store.Stash, ptr)
 
 		if len(items) == blockSize {
 			break
@@ -450,4 +451,11 @@ func (o *oblivious) Rollback(ctx context.Context) {
 	}
 	o.base.Commit(ctx)
 	return
+}
+
+func (o *oblivious) dirtyRollback(ctx context.Context) {
+	if err := o.store.Commit(ctx, o.integ.curr.Version); err != nil {
+		panic(err)
+	}
+	o.base.Rollback(ctx)
 }
