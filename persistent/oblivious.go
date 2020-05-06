@@ -181,6 +181,14 @@ func (o *oblivious) Get(ctx context.Context, ptr uint64) ([]byte, error) {
 }
 
 func (o *oblivious) startAccess(ctx context.Context, ptrs []uint64) (map[uint64]uint64, error) {
+	if o.store.Count == 0 {
+		out := make(map[uint64]uint64)
+		for _, ptr := range ptrs {
+			out[ptr] = 0
+		}
+		return out, nil
+	}
+
 	// Lookup the leaf each pointer is currently assigned to.
 	assignments, err := o.store.Lookup(ctx, ptrs)
 	if err != nil {
@@ -347,7 +355,7 @@ func (o *oblivious) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]by
 		return nil, fmt.Errorf("oblivious: an error condition has occured, please rollback")
 	}
 	out := make(map[uint64][]byte)
-	if len(ptrs) == 0 {
+	if len(ptrs) == 0 || o.store.Count == 0 {
 		return out, nil
 	}
 

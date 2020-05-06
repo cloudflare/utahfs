@@ -178,14 +178,14 @@ func (lo *localOblivious) initTx(ctx context.Context, version uint64, tx *sql.Tx
 	}
 
 	// Compute the count of leaves stored.
-	var count uint64
+	var count *uint64
 	err = tx.QueryRowContext(ctx, "SELECT MAX(ptr) FROM position WHERE version <= ?", version).Scan(&count)
-	if err == sql.ErrNoRows {
-		count = 0
-	} else if err != nil {
+	if err != nil {
 		return nil, 0, err
+	} else if count == nil {
+		count = new(uint64)
 	} else {
-		count += 1
+		*count += 1
 	}
 
 	// Keep the positions map clean by removing overlapping assignments and
@@ -202,7 +202,7 @@ func (lo *localOblivious) initTx(ctx context.Context, version uint64, tx *sql.Tx
 		return nil, 0, err
 	}
 
-	return stash, count, nil
+	return stash, *count, nil
 }
 
 // deleteOverlapping deletes previous versions of assignments that were made
