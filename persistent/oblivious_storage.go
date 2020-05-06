@@ -103,8 +103,10 @@ type localOblivious struct {
 // interface, used for storing temporary ORAM data, that's backed by an on-disk
 // database at `loc`.
 func NewLocalOblivious(loc string) (ObliviousStorage, error) {
-	if err := os.MkdirAll(path.Dir(loc), 0744); err != nil {
-		return nil, err
+	if loc != ":memory" {
+		if err := os.MkdirAll(path.Dir(loc), 0744); err != nil {
+			return nil, err
+		}
 	}
 	db, err := sql.Open("sqlite3", loc)
 	if err != nil {
