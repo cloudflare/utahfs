@@ -257,7 +257,7 @@ func (c *Client) FS(mountPath string) (*utahfs.BlockFilesystem, error) {
 	if c.DataSize == 0 {
 		c.DataSize = 32 * 1024
 	}
-	bfs, err := utahfs.NewBlockFilesystem(appStore, c.NumPtrs, c.DataSize)
+	bfs, err := utahfs.NewBlockFilesystem(appStore, c.NumPtrs, c.DataSize, true)
 	if err != nil {
 		return nil, err
 	}

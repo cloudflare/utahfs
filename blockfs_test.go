@@ -111,14 +111,22 @@ func testBFS(t *testing.T, td *testData) {
 	td.pos, td.data = pos, data
 }
 
+func TestBlockFilesystemSplitPtrs(t *testing.T) {
+	testBlockFilesystem(t, true)
+}
+
 func TestBlockFilesystem(t *testing.T) {
+	testBlockFilesystem(t, false)
+}
+
+func testBlockFilesystem(t *testing.T, splitPtrs bool) {
 	ctx := context.Background()
 
 	store := persistent.NewAppStorage(persistent.NewBlockMemory())
 	if err := store.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	bfs, err := NewBlockFilesystem(store, 3, 256)
+	bfs, err := NewBlockFilesystem(store, 3, 256, splitPtrs)
 	if err != nil {
 		t.Fatal(err)
 	}

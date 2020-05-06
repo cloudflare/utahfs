@@ -20,8 +20,9 @@ func d(ptr uint64) uint64 { return 2*ptr + 1 }
 type BlockFilesystem struct {
 	store *persistent.AppStorage
 
-	numPtrs  int64
-	dataSize int64
+	numPtrs   int64
+	dataSize  int64
+	splitPtrs bool
 }
 
 // NewBlockFilesystem returns a new block-based filesystem. Blocks will have
@@ -36,7 +37,11 @@ type BlockFilesystem struct {
 //      blocks which have been discarded and are free for re-allocation.
 //   2. next - The next unallocated pointer. A block with this pointer is
 //      created only if the trash list is empty.
-func NewBlockFilesystem(store *persistent.AppStorage, numPtrs, dataSize int64) (*BlockFilesystem, error) {
+//
+// `splitPtrs` is true if the pointers section of a block should be stored
+// separately from the data section, and false if they should be stored
+// together. Storing them separately can improve seek performance.
+func NewBlockFilesystem(store *persistent.AppStorage, numPtrs, dataSize int64, splitPtrs bool) (*BlockFilesystem, error) {
 	if numPtrs < 1 {
 		return nil, fmt.Errorf("blockfs: number of pointers must be greater than zero")
 	} else if dataSize < 1 || dataSize >= (1<<24) {
@@ -46,11 +51,13 @@ func NewBlockFilesystem(store *persistent.AppStorage, numPtrs, dataSize int64) (
 	return &BlockFilesystem{
 		store: store,
 
-		numPtrs:  numPtrs,
-		dataSize: dataSize,
+		numPtrs:   numPtrs,
+		dataSize:  dataSize,
+		splitPtrs: splitPtrs,
 	}, nil
 }
 
+func (bfs *BlockFilesystem) blockSize() int64     { return bfs.blockPtrsSize() + bfs.blockDataSize() }
 func (bfs *BlockFilesystem) blockPtrsSize() int64 { return 8 * bfs.numPtrs }
 func (bfs *BlockFilesystem) blockDataSize() int64 { return 3 + bfs.dataSize }
 
@@ -65,17 +72,25 @@ func (bfs *BlockFilesystem) allocate(ctx context.Context) (uint64, error) {
 		return next, nil
 	}
 
-	rawPtrs, err := bfs.store.Get(ctx, p(state.TrashPtr))
-	if err != nil {
-		return nilPtr, err
-	}
 	b := &block{parent: bfs}
-	if err := b.UnmarshalPtrs(rawPtrs); err != nil {
-		return nilPtr, fmt.Errorf("blockfs: failed to parse block %x: %v", state.TrashPtr, err)
+	if bfs.splitPtrs {
+		rawPtrs, err := bfs.store.Get(ctx, p(state.TrashPtr))
+		if err != nil {
+			return nilPtr, err
+		} else if err := b.UnmarshalPtrs(rawPtrs); err != nil {
+			return nilPtr, fmt.Errorf("blockfs: failed to parse block %x: %v", state.TrashPtr, err)
+		}
+	} else {
+		raw, err := bfs.store.Get(ctx, state.TrashPtr)
+		if err != nil {
+			return nilPtr, err
+		} else if err := b.Unmarshal(raw); err != nil {
+			return nilPtr, fmt.Errorf("blockfs: failed to parse block %x: %v", state.TrashPtr, err)
+		}
 	}
+
 	trash := state.TrashPtr
 	state.TrashPtr = b.ptrs[0]
-
 	return trash, nil
 }
 
@@ -196,11 +211,18 @@ type BlockFile struct {
 
 // persist saves any changes to the current block to the storage backend.
 func (bf *BlockFile) persist() error {
-	err := bf.parent.store.Set(bf.ctx, p(bf.ptr), bf.curr.MarshalPtrs(), persistent.Metadata)
-	if err != nil {
-		return err
-	} else if bf.curr.data != nil {
-		err := bf.parent.store.Set(bf.ctx, d(bf.ptr), bf.curr.MarshalData(), bf.dt)
+	if bf.parent.splitPtrs {
+		err := bf.parent.store.Set(bf.ctx, p(bf.ptr), bf.curr.MarshalPtrs(), persistent.Metadata)
+		if err != nil {
+			return err
+		} else if bf.curr.data != nil {
+			err := bf.parent.store.Set(bf.ctx, d(bf.ptr), bf.curr.MarshalData(), bf.dt)
+			if err != nil {
+				return err
+			}
+		}
+	} else {
+		err := bf.parent.store.Set(bf.ctx, bf.ptr, bf.curr.Marshal(), bf.dt)
 		if err != nil {
 			return err
 		}
@@ -211,27 +233,37 @@ func (bf *BlockFile) persist() error {
 // load pulls the block at `ptr` into memory. `pos` is our new position in the
 // file.
 func (bf *BlockFile) load(ptr uint64, pos int64, data bool) error { // NOTE: Don't load ptrs twice.
-	ptrPtr, dataPtr := p(ptr), d(ptr)
-	ptrs := []uint64{ptrPtr}
-	if data {
-		ptrs = append(ptrs, dataPtr)
-	}
-
-	raw, err := bf.parent.store.GetMany(bf.ctx, ptrs)
-	if err != nil {
-		return err
-	}
-	for _, ptr := range ptrs {
-		if raw[ptr] == nil {
-			return persistent.ErrObjectNotFound
-		}
-	}
-
 	curr := &block{parent: bf.parent}
-	if err := curr.UnmarshalPtrs(raw[ptrPtr]); err != nil {
-		return fmt.Errorf("blockfs: failed to parse block %x: %v", ptr, err)
-	} else if data {
-		if err := curr.UnmarshalData(raw[dataPtr]); err != nil {
+
+	if bf.parent.splitPtrs {
+		ptrPtr, dataPtr := p(ptr), d(ptr)
+		ptrs := []uint64{ptrPtr}
+		if data {
+			ptrs = append(ptrs, dataPtr)
+		}
+
+		raw, err := bf.parent.store.GetMany(bf.ctx, ptrs)
+		if err != nil {
+			return err
+		}
+		for _, ptr := range ptrs {
+			if raw[ptr] == nil {
+				return persistent.ErrObjectNotFound
+			}
+		}
+
+		if err := curr.UnmarshalPtrs(raw[ptrPtr]); err != nil {
+			return fmt.Errorf("blockfs: failed to parse block %x: %v", ptr, err)
+		} else if data {
+			if err := curr.UnmarshalData(raw[dataPtr]); err != nil {
+				return fmt.Errorf("blockfs: failed to parse block %x: %v", ptr, err)
+			}
+		}
+	} else {
+		raw, err := bf.parent.store.Get(bf.ctx, ptr)
+		if err != nil {
+			return err
+		} else if err := curr.Unmarshal(raw); err != nil {
 			return fmt.Errorf("blockfs: failed to parse block %x: %v", ptr, err)
 		}
 	}
@@ -327,7 +359,7 @@ func (bf *BlockFile) write(first bool, p []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	if first {
+	if first && bf.parent.splitPtrs {
 		bf.curr.data = nil
 	}
 	ptrs := bf.curr.Upgrade(bf.idx, bf.ptr, ptr) // NOTE: Are we just changing ptrs here? Unload data if so?
@@ -544,6 +576,10 @@ func (b *block) Upgrade(currIdx int64, currPtr, nextPtr uint64) []uint64 {
 	return out
 }
 
+func (b *block) Marshal() []byte {
+	return append(b.MarshalPtrs(), b.MarshalData()...)
+}
+
 func (b *block) MarshalPtrs() []byte {
 	out := make([]byte, b.parent.blockPtrsSize())
 	rest := out[0:]
@@ -568,6 +604,16 @@ func (b *block) MarshalData() []byte {
 	copy(rest, b.data)
 
 	return out
+}
+
+func (b *block) Unmarshal(raw []byte) error {
+	if int64(len(raw)) != b.parent.blockSize() {
+		return fmt.Errorf("blockfs: unexpected size: %v != %v", len(raw), b.parent.blockSize())
+	}
+	if err := b.UnmarshalPtrs(raw[:b.parent.blockPtrsSize()]); err != nil {
+		return err
+	}
+	return b.UnmarshalData(raw[b.parent.blockPtrsSize():])
 }
 
 func (b *block) UnmarshalPtrs(raw []byte) error {
