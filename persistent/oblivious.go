@@ -243,6 +243,9 @@ func (o *oblivious) startAccess(ctx context.Context, ptrs []uint64) (map[uint64]
 		}
 	}
 	for ptr, data := range stash {
+		if _, ok := o.store.Stash[ptr]; ok {
+			continue
+		}
 		o.store.Stash[ptr] = data
 	}
 
