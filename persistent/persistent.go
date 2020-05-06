@@ -65,7 +65,7 @@ type BlockStorage interface {
 	Start(ctx context.Context, prefetch []uint64) (data map[uint64][]byte, err error)
 
 	Get(ctx context.Context, ptr uint64) (data []byte, err error)
-	GetMany(ctx context.Context, ptr []uint64) (data map[uint64][]byte, err error)
+	GetMany(ctx context.Context, ptrs []uint64) (data map[uint64][]byte, err error)
 	Set(ctx context.Context, ptr uint64, data []byte, dt DataType) (err error)
 
 	Commit(ctx context.Context) error

@@ -135,7 +135,7 @@ type oblivious struct {
 func WithORAM(base BlockStorage, store ObliviousStorage, maxSize int64) (BlockStorage, error) {
 	// Extract the integrity layer so we have access to the current version of
 	// the corpus.
-	enc, ok := base.(*encryption)
+	enc, ok := unwrapAuditor(base).(*encryption)
 	if !ok {
 		return nil, fmt.Errorf("oblivious: expected encryption layer as input, but got: %T", base)
 	}
@@ -453,9 +453,52 @@ func (o *oblivious) Rollback(ctx context.Context) {
 	return
 }
 
+// All the code below this line is only used for testing.
+
 func (o *oblivious) dirtyRollback(ctx context.Context) {
 	if err := o.store.Commit(ctx, o.integ.curr.Version); err != nil {
 		panic(err)
 	}
 	o.base.Rollback(ctx)
 }
+
+type oramAuditor struct {
+	base BlockStorage
+
+	blocksRead, blocksWritten map[uint64]int
+}
+
+func unwrapAuditor(base BlockStorage) BlockStorage {
+	if auditor, ok := base.(*oramAuditor); ok {
+		return auditor.base
+	}
+	return base
+}
+
+func (oa *oramAuditor) Start(ctx context.Context, _ []uint64) (map[uint64][]byte, error) {
+	oa.blocksRead, oa.blocksWritten = make(map[uint64]int), make(map[uint64]int)
+	return oa.base.Start(ctx, nil)
+}
+
+func (oa *oramAuditor) Get(ctx context.Context, ptr uint64) ([]byte, error) {
+	oa.blocksRead[ptr] += 1
+	return oa.base.Get(ctx, ptr)
+}
+
+func (oa *oramAuditor) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]byte, error) {
+	for _, ptr := range ptrs {
+		oa.blocksRead[ptr] += 1
+	}
+	return oa.base.GetMany(ctx, ptrs)
+}
+
+func (oa *oramAuditor) Set(ctx context.Context, ptr uint64, data []byte, dt DataType) error {
+	oa.blocksWritten[ptr] += 1
+	if len(data) != 112 {
+		panic("tried to set block of data with wrong size")
+	}
+	return oa.base.Set(ctx, ptr, data, dt)
+}
+
+func (oa *oramAuditor) Commit(ctx context.Context) error { return oa.base.Commit(ctx) }
+func (oa *oramAuditor) Rollback(ctx context.Context)     { oa.base.Rollback(ctx) }
