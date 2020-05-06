@@ -288,7 +288,11 @@ func (lo *localOblivious) Commit(ctx context.Context, version uint64, stash map[
 		}
 	}
 
-	data, err := json.Marshal(assignments)
+	ptrs := make([]uint64, 0, len(assignments))
+	for ptr, _ := range assignments {
+		ptrs = append(ptrs, ptr)
+	}
+	data, err := json.Marshal(ptrs)
 	if err != nil {
 		return err
 	}

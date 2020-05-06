@@ -87,13 +87,14 @@ func testORAMCorrectness(store BlockStorage) func(t *testing.T) {
 			for i := 0; i < 10; i++ {
 				ptr := uint64(mrand.Intn(100))
 
-				val1, err := store.Get(ctx, ptr)
-				if err != nil {
-					t.Fatal(err)
-				}
-				val2, _ := backup.Get(ctx, ptr)
+				val1, err1 := store.Get(ctx, ptr)
+				val2, err2 := backup.Get(ctx, ptr)
 
-				if !bytes.Equal(val1, val2) {
+				if err1 == ErrObjectNotFound && err2 == ErrObjectNotFound {
+					continue
+				} else if err1 != nil {
+					t.Fatal(err1)
+				} else if !bytes.Equal(val1, val2) {
 					t.Fatal("ORAM storage contains a different value than backup!")
 				}
 			}
