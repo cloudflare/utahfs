@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math/big"
 )
 
 const (
@@ -26,20 +27,20 @@ func marshalBucket(items map[uint64][]byte, maxSize int64) []byte {
 	buff.Grow(targetSize)
 
 	for ptr, data := range items {
-		if len(data) > maxSize {
+		if int64(len(data)) > maxSize {
 			panic("data in bucket is larger than max size")
 		}
 
 		if err := binary.Write(buff, binary.LittleEndian, ptr); err != nil { // Pointer.
 			panic(err)
 		}
-		if _, err := binary.Write(buff, binary.LittleEndian, uint32(len(data))); err != nil { // Data length.
+		if err := binary.Write(buff, binary.LittleEndian, uint32(len(data))); err != nil { // Data length.
 			panic(err)
 		}
 		if _, err := buff.Write(data); err != nil { // Data.
 			panic(err)
 		}
-		if _, err := buff.Write(make([]byte, maxSize-len(data))); err != nil { // Zero padding.
+		if _, err := buff.Write(make([]byte, maxSize-int64(len(data)))); err != nil { // Zero padding.
 			panic(err)
 		}
 	}
@@ -88,7 +89,7 @@ func unmarshalBucket(data []byte, maxSize int64) (map[uint64][]byte, error) {
 		}
 
 		// Zero padding.
-		padding := make([]byte, maxSize-dataLen)
+		padding := make([]byte, maxSize-int64(dataLen))
 		if _, err := io.ReadFull(r, padding); err != nil {
 			return nil, err
 		}
@@ -126,8 +127,8 @@ type oblivious struct {
 
 // WithORAM wraps a BlockStorage implementation and prevents outsiders from
 // seeing the user's access pattern. This includes which data a user is
-// accessing and whether the user is reading or writing, but not the total
-// amount of accesses or when.
+// accessing and whether the user is reading or writing, but does not include
+// the total amount of accesses or when.
 //
 // A small amount of local data is stored in `store`. `maxSize` is the maximum
 // size of a block of data.
@@ -204,7 +205,7 @@ func (o *oblivious) startAccess(ctx context.Context, ptrs []uint64) (map[uint64]
 	root := rootNode(o.store.Count)
 
 	nodesDedup := make(map[uint64]struct{})
-	for ptr, leaf := range assignments {
+	for _, leaf := range assignments {
 		for node := 2 * leaf; node != root; node = parentStep(node) {
 			if node < maxNode {
 				nodesDedup[node] = struct{}{}
@@ -237,7 +238,7 @@ func (o *oblivious) startAccess(ctx context.Context, ptrs []uint64) (map[uint64]
 		o.store.Stash[ptr] = data
 	}
 
-	return assigments, nil
+	return assignments, nil
 }
 
 func (o *oblivious) finishAccess(ctx context.Context, assignments map[uint64]uint64) error {
@@ -253,10 +254,11 @@ func (o *oblivious) finishAccess(ctx context.Context, assignments map[uint64]uin
 	for ptr, _ := range assignments {
 		leaf, err := rand.Int(rand.Reader, maxLeaf)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		assignments[ptr] = leaf.Uint64()
 	}
+	o.store.Assign(assignments)
 
 	// There's a lot of stuff in the stash unrelated to our query. Lookup the
 	// assigned leafs for all those pointers and merge them into `assignments`.
@@ -268,7 +270,7 @@ func (o *oblivious) finishAccess(ctx context.Context, assignments map[uint64]uin
 	}
 	extra, err := o.store.Lookup(ctx, extraPtrs)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	for ptr, leaf := range extra {
 		assignments[ptr] = leaf
@@ -288,8 +290,8 @@ func (o *oblivious) finishAccess(ctx context.Context, assignments map[uint64]uin
 		for node, _ := range nodes {
 			if node >= maxNode {
 				continue
-			} else if err := o.buildBucket(node, assignments); err != nil {
-				return nil, err
+			} else if err := o.buildBucket(ctx, node, assignments); err != nil {
+				return err
 			}
 		}
 
@@ -313,7 +315,7 @@ func (o *oblivious) finishAccess(ctx context.Context, assignments map[uint64]uin
 	return nil
 }
 
-func (o *oblivious) buildBucket(node uint64, assignments map[uint64]uint64) error {
+func (o *oblivious) buildBucket(ctx context.Context, node uint64, assignments map[uint64]uint64) error {
 	items := make(map[uint64][]byte)
 	itemsRollback := make(map[uint64][]byte)
 
@@ -327,7 +329,7 @@ func (o *oblivious) buildBucket(node uint64, assignments map[uint64]uint64) erro
 		items[ptr] = o.store.Stash[ptr]
 		delete(o.store.Stash, ptr)
 
-		if orig, ok := o.originalValues[ptr]; ok && orig != nil {
+		if orig, ok := o.originalVals[ptr]; ok && orig != nil {
 			itemsRollback[ptr] = orig
 		}
 
@@ -337,7 +339,7 @@ func (o *oblivious) buildBucket(node uint64, assignments map[uint64]uint64) erro
 	}
 
 	o.rollbackWrites[node] = marshalBucket(itemsRollback, o.maxSize)
-	return o.base.Set(ctx, node, marshalBucket(items, o.maxSize))
+	return o.base.Set(ctx, node, marshalBucket(items, o.maxSize), Content)
 }
 
 func (o *oblivious) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]byte, error) {
@@ -368,15 +370,15 @@ func (o *oblivious) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]by
 	return out, nil
 }
 
-func (o *oblivious) Set(ctx context.Context, ptr uint64, data []byte, dt DataType) error {
+func (o *oblivious) Set(ctx context.Context, ptr uint64, data []byte, _ DataType) error {
 	if o.needRollback {
-		return nil, fmt.Errorf("oblivious: an error condition has occured, please rollback")
+		return fmt.Errorf("oblivious: an error condition has occured, please rollback")
 	}
 
 	assignments, err := o.startAccess(ctx, []uint64{ptr})
 	if err != nil {
 		o.needRollback = true
-		return nil, err
+		return err
 	}
 
 	if o.store.Count <= ptr {
@@ -389,7 +391,7 @@ func (o *oblivious) Set(ctx context.Context, ptr uint64, data []byte, dt DataTyp
 
 	if err := o.finishAccess(ctx, assignments); err != nil {
 		o.needRollback = true
-		return nil, err
+		return err
 	}
 
 	return nil
@@ -397,11 +399,11 @@ func (o *oblivious) Set(ctx context.Context, ptr uint64, data []byte, dt DataTyp
 
 func (o *oblivious) Commit(ctx context.Context) error {
 	if o.needRollback {
-		return nil, fmt.Errorf("oblivious: an error condition has occured, please rollback")
+		return fmt.Errorf("oblivious: an error condition has occured, please rollback")
 	}
 
 	if err := o.store.Commit(ctx, o.integ.curr.Version); err != nil {
-		o.base.Rollback()
+		o.base.Rollback(ctx)
 		return err
 	}
 	return o.base.Commit(ctx)
@@ -423,7 +425,7 @@ func (o *oblivious) Rollback(ctx context.Context) {
 	// data and we need to persist those changes to preserve the privacy
 	// guarantees of ORAM. Changes from Set requests are explicitly undone.
 	for node, data := range o.rollbackWrites {
-		if err := o.base.Set(ctx, node, data); err != nil {
+		if err := o.base.Set(ctx, node, data, Content); err != nil {
 			o.needRollback = true
 			o.Rollback(ctx)
 			return
@@ -431,8 +433,9 @@ func (o *oblivious) Rollback(ctx context.Context) {
 	}
 
 	if err := o.store.Commit(ctx, o.integ.curr.Version); err != nil {
-		o.base.Rollback()
-		return err
+		o.base.Rollback(ctx)
+		return
 	}
-	return o.base.Commit(ctx)
+	o.base.Commit(ctx)
+	return
 }

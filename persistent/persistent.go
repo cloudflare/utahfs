@@ -77,7 +77,7 @@ type BlockStorage interface {
 type ObliviousStorage interface {
 	// Start begins a new transaction. It returns the number of blocks and the
 	// current stash.
-	Start(ctx context.Context) (size uint64, stash map[uint64][]byte, err error)
+	Start(ctx context.Context, version uint64) (stash map[uint64][]byte, size uint64, err error)
 
 	// Lookup returns a map from each requested pointer, to the leaf that the
 	// pointer is assigned to.
@@ -85,7 +85,10 @@ type ObliviousStorage interface {
 
 	// Commit ends the transaction, replacing the stash with the given map and
 	// making the requested pointer-to-leaf assignments.
-	Commit(ctx context.Context, stash map[uint64][]byte, assignments map[uint64]uint64) error
+	Commit(ctx context.Context, version uint64, stash map[uint64][]byte, assignments map[uint64]uint64) error
+
+	// Rollback aborts the transaction without attempting to make any changes.
+	Rollback(ctx context.Context)
 }
 
 // MapMutex implements the ability to lock and unlock specific keys of a map.
