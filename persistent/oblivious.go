@@ -333,8 +333,12 @@ func (o *oblivious) buildBucket(ctx context.Context, node uint64, assignments ma
 		if node != cand {
 			continue
 		}
+		val, ok := o.store.Stash[ptr]
+		if !ok {
+			continue
+		}
 
-		items[ptr] = o.store.Stash[ptr]
+		items[ptr] = val
 		delete(o.store.Stash, ptr)
 
 		if orig, ok := o.originalVals[ptr]; ok && orig != nil {

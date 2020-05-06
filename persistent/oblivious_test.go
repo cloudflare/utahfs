@@ -31,7 +31,11 @@ func TestOblivious(t *testing.T) {
 	}
 
 	// Setup block storage.
-	base := NewBlockMemory()
+	disk, err := NewDisk(tempDir + "/db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := NewSimpleBlock(NewBufferedStorage(NewSimpleReliable(disk)))
 
 	integ, err := WithIntegrity(base, "password", tempDir+"/pin.json")
 	if err != nil {
@@ -39,7 +43,7 @@ func TestOblivious(t *testing.T) {
 	}
 	enc := WithEncryption(integ, "password")
 
-	store, err := WithORAM(enc, localStore, 1024)
+	store, err := WithORAM(enc, localStore, 16)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +68,7 @@ func testORAMCorrectness(store BlockStorage) func(t *testing.T) {
 			// rolled back.
 			for i := 0; i < 10; i++ {
 				ptr := uint64(mrand.Intn(100))
-				val := make([]byte, 1024)
+				val := make([]byte, mrand.Intn(15)+1)
 				if _, err := rand.Read(val); err != nil {
 					t.Fatal(err)
 				}
@@ -78,7 +82,7 @@ func testORAMCorrectness(store BlockStorage) func(t *testing.T) {
 			}
 
 			// Rollback if needed.
-			if rollback {
+			if rollback { // TODO: Also test partial rollback.
 				store.Rollback(ctx)
 				continue
 			}
