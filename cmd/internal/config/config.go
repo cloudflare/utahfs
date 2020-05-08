@@ -227,8 +227,7 @@ func (c *Client) FS(mountPath string) (*utahfs.BlockFilesystem, error) {
 	}
 
 	// Setup buffered block storage.
-	buffered := persistent.NewBufferedStorage(relStore)
-	block := persistent.NewSimpleBlock(buffered)
+	block := persistent.NewBufferedStorage(relStore)
 
 	// Setup encryption and integrity.
 	if c.Password == "" {

@@ -53,11 +53,7 @@ func NewLocalWAL(base ObjectStorage, loc string, maxSize, parallelism int) (Reli
 	if err != nil {
 		return nil, err
 	}
-	_, err = local.Exec("CREATE TABLE IF NOT EXISTS wal (id integer not null primary key, key text, val bytea, dt integer)")
-	if err != nil {
-		return nil, err
-	}
-	_, err = local.Exec("CREATE INDEX IF NOT EXISTS by_key ON wal(key)")
+	_, err = local.Exec("CREATE TABLE IF NOT EXISTS wal (key integer not null primary key, val bytea, dt integer)")
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +96,7 @@ func (lw *localWAL) drain() {
 }
 
 type walReq struct {
-	key string
+	key uint64
 	val []byte
 	dt  DataType
 }
@@ -120,9 +116,9 @@ func (lw *localWAL) drainOnce() error {
 
 				var err error
 				if len(req.val) > 0 {
-					err = lw.base.Set(context.Background(), req.key, req.val, req.dt)
+					err = lw.base.Set(context.Background(), hex(req.key), req.val, req.dt)
 				} else {
-					err = lw.base.Delete(context.Background(), req.key)
+					err = lw.base.Delete(context.Background(), hex(req.key))
 				}
 
 				errs <- err
@@ -132,28 +128,25 @@ func (lw *localWAL) drainOnce() error {
 
 	for {
 		var (
-			ids  []string
-			keys []string
+			keys []uint64
 			vals [][]byte
 			dts  []DataType
 		)
 
-		rows, err := lw.local.Query("SELECT id, key, val, dt FROM wal LIMIT 100")
+		rows, err := lw.local.Query("SELECT key, val, dt FROM wal LIMIT 100")
 		if err != nil {
 			return err
 		}
 		for rows.Next() {
 			var (
-				id  int
-				key string
+				key uint64
 				val []byte
 				dt  DataType
 			)
-			if err := rows.Scan(&id, &key, &val, &dt); err != nil {
+			if err := rows.Scan(&key, &val, &dt); err != nil {
 				rows.Close()
 				return err
 			}
-			ids = append(ids, fmt.Sprint(id))
 			keys = append(keys, key)
 			vals = append(vals, val)
 			dts = append(dts, dt)
@@ -163,16 +156,16 @@ func (lw *localWAL) drainOnce() error {
 			return err
 		}
 		rows.Close()
-		if len(ids) == 0 {
+		if len(keys) == 0 {
 			return nil
 		}
 
 		// Write entries read from the WAL to the underlying storage. This is
 		// done outside of the database query to prevent blocking other threads.
-		for i, _ := range ids {
+		for i, _ := range keys {
 			reqs <- walReq{keys[i], vals[i], dts[i]}
 		}
-		for range ids {
+		for range keys {
 			if subErr := <-errs; subErr != nil {
 				err = subErr
 			}
@@ -181,7 +174,11 @@ func (lw *localWAL) drainOnce() error {
 			return err
 		}
 
-		_, err = lw.local.Exec("DELETE FROM wal WHERE id in (" + strings.Join(ids, ",") + ")")
+		keyStrs := make([]string, 0, len(keys))
+		for _, key := range keys {
+			keyStrs = append(keyStrs, fmt.Sprint(key))
+		}
+		_, err = lw.local.Exec("DELETE FROM wal WHERE key in (" + strings.Join(keyStrs, ",") + ")")
 		if err != nil {
 			return err
 		}
@@ -212,7 +209,7 @@ func (lw *localWAL) count() (int, error) {
 	return count, nil
 }
 
-func (lw *localWAL) Start(ctx context.Context, prefetch []string) (map[string][]byte, error) {
+func (lw *localWAL) Start(ctx context.Context, prefetch []uint64) (map[uint64][]byte, error) {
 	// Block until the database has drained enough to accept new writes.
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -236,11 +233,11 @@ func (lw *localWAL) Start(ctx context.Context, prefetch []string) (map[string][]
 	}
 }
 
-func (lw *localWAL) Get(ctx context.Context, key string) ([]byte, error) {
+func (lw *localWAL) Get(ctx context.Context, key uint64) ([]byte, error) {
 	var val []byte
 	err := lw.local.QueryRowContext(ctx, "SELECT val FROM wal WHERE key = ?", key).Scan(&val)
 	if err == sql.ErrNoRows {
-		return lw.base.Get(ctx, key)
+		return lw.base.Get(ctx, hex(key))
 	} else if len(val) == 0 {
 		return nil, ErrObjectNotFound
 	} else if err != nil {
@@ -249,8 +246,8 @@ func (lw *localWAL) Get(ctx context.Context, key string) ([]byte, error) {
 	return val, nil
 }
 
-func (lw *localWAL) GetMany(ctx context.Context, keys []string) (map[string][]byte, error) {
-	out := make(map[string][]byte)
+func (lw *localWAL) GetMany(ctx context.Context, keys []uint64) (map[uint64][]byte, error) {
+	out := make(map[uint64][]byte)
 	for _, key := range keys {
 		val, err := lw.Get(ctx, key)
 		if err == ErrObjectNotFound {
@@ -263,7 +260,7 @@ func (lw *localWAL) GetMany(ctx context.Context, keys []string) (map[string][]by
 	return out, nil
 }
 
-func (lw *localWAL) Commit(ctx context.Context, writes map[string]WriteData) error {
+func (lw *localWAL) Commit(ctx context.Context, writes map[uint64]WriteData) error {
 	if len(writes) == 0 {
 		return nil
 	}

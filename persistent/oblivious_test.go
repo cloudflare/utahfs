@@ -35,7 +35,7 @@ func TestOblivious(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := NewSimpleBlock(NewBufferedStorage(NewSimpleReliable(disk)))
+	base := NewBufferedStorage(NewSimpleReliable(disk))
 
 	integ, err := WithIntegrity(base, "password", tempDir+"/pin.json")
 	if err != nil {

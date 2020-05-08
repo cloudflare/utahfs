@@ -1,8 +1,10 @@
 package persistent
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
@@ -10,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -107,18 +110,14 @@ func generateConfig(transportKey, hostname string) (*tls.Config, error) {
 	return cfg, nil
 }
 
-func writeMap(w io.Writer, data map[string][]byte) error {
+func writeMap(w io.Writer, data map[uint64][]byte) error {
 	for key, val := range data {
-		if len(key) > 255 || len(val) > 16777215 {
-			return fmt.Errorf("remote: unable to serialize map")
-		}
-		hdr := []byte{
-			byte(len(key)),
-			byte(len(val)), byte(len(val) >> 8), byte(len(val) >> 16),
-		}
-		if _, err := w.Write(hdr); err != nil {
-			return err
-		} else if _, err := w.Write([]byte(key)); err != nil {
+		hdr := make([]byte, 2*binary.MaxVarintLen64)
+
+		n := binary.PutUvarint(hdr, key)
+		m := binary.PutUvarint(hdr[n:], uint64(len(val)))
+
+		if _, err := w.Write(hdr[:n+m]); err != nil {
 			return err
 		} else if _, err := w.Write(val); err != nil {
 			return err
@@ -127,25 +126,42 @@ func writeMap(w io.Writer, data map[string][]byte) error {
 	return nil
 }
 
-func readMap(r io.Reader) (map[string][]byte, error) {
-	out := make(map[string][]byte)
+func readMap(r io.Reader) (map[uint64][]byte, error) {
+	br := bufio.NewReader(r)
+	out := make(map[uint64][]byte)
 
 	for {
-		hdr := make([]byte, 4)
-		if _, err := io.ReadFull(r, hdr); err == io.EOF {
+		key, err := binary.ReadUvarint(br)
+		if err == io.EOF {
 			return out, nil
 		} else if err != nil {
 			return nil, err
 		}
-		key := make([]byte, int(hdr[0]))
-		val := make([]byte, int(hdr[1])+int(hdr[2])<<8+int(hdr[3])<<16)
-		if _, err := io.ReadFull(r, key); err != nil {
-			return nil, err
-		} else if _, err := io.ReadFull(r, val); err != nil {
+
+		valLen, err := binary.ReadUvarint(br)
+		if err != nil {
 			return nil, err
 		}
-		out[string(key)] = val
+		val := make([]byte, valLen)
+		if _, err := io.ReadFull(br, val); err != nil {
+			return nil, err
+		}
+		out[key] = val
 	}
+}
+
+func parseKeys(in []string) ([]uint64, error) {
+	out := make([]uint64, 0, len(in))
+
+	for _, keyStr := range in {
+		key, err := strconv.ParseUint(keyStr, 16, 64)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, key)
+	}
+
+	return out, nil
 }
 
 type remoteClient struct {
@@ -205,7 +221,7 @@ func NewRemoteClient(transportKey, serverUrl string) (ReliableStorage, error) {
 	return rc, nil
 }
 
-func (rc *remoteClient) get(ctx context.Context, loc string) (map[string][]byte, error) {
+func (rc *remoteClient) get(ctx context.Context, loc string) (map[uint64][]byte, error) {
 	parsed, err := url.Parse(loc)
 	if err != nil {
 		return nil, err
@@ -285,7 +301,7 @@ func (rc *remoteClient) maintain() {
 	}
 }
 
-func (rc *remoteClient) Start(ctx context.Context, prefetch []string) (map[string][]byte, error) {
+func (rc *remoteClient) Start(ctx context.Context, prefetch []uint64) (map[uint64][]byte, error) {
 	// Generate a random transaction id, let the server know about it, and store
 	// it in `rc` so that the maintainer thread knows about it.
 	if rc.getId() != "" {
@@ -299,7 +315,7 @@ func (rc *remoteClient) Start(ctx context.Context, prefetch []string) (map[strin
 
 	loc := "start?id=" + id
 	for _, key := range prefetch {
-		loc += "&key=" + url.QueryEscape(key)
+		loc += "&key=" + hex(key)
 	}
 	data, err := rc.get(ctx, loc)
 	if err != nil {
@@ -315,8 +331,8 @@ func (rc *remoteClient) Start(ctx context.Context, prefetch []string) (map[strin
 	return data, nil
 }
 
-func (rc *remoteClient) Get(ctx context.Context, key string) ([]byte, error) {
-	data, err := rc.GetMany(ctx, []string{key})
+func (rc *remoteClient) Get(ctx context.Context, key uint64) ([]byte, error) {
+	data, err := rc.GetMany(ctx, []uint64{key})
 	if err != nil {
 		return nil, err
 	} else if data[key] == nil {
@@ -325,24 +341,24 @@ func (rc *remoteClient) Get(ctx context.Context, key string) ([]byte, error) {
 	return data[key], nil
 }
 
-func (rc *remoteClient) GetMany(ctx context.Context, keys []string) (map[string][]byte, error) {
+func (rc *remoteClient) GetMany(ctx context.Context, keys []uint64) (map[uint64][]byte, error) {
 	id := rc.getId()
 	if id == "" {
 		return nil, fmt.Errorf("remote: transaction not active")
 	}
 	loc := "get?id=" + id
 	for _, key := range keys {
-		loc += "&key=" + url.QueryEscape(key)
+		loc += "&key=" + hex(key)
 	}
 	return rc.get(ctx, loc)
 }
 
-func (rc *remoteClient) Commit(ctx context.Context, writes map[string]WriteData) error {
+func (rc *remoteClient) Commit(ctx context.Context, writes map[uint64]WriteData) error {
 	id := rc.getId()
 	if id == "" {
 		return fmt.Errorf("remote: transaction not active")
 	}
-	data := make(map[string][]byte)
+	data := make(map[uint64][]byte)
 	for key, wr := range writes {
 		if wr.Type < 0 || wr.Type > 255 {
 			return fmt.Errorf("remote: write type is out of bounds")
@@ -451,7 +467,14 @@ func (rs *remoteServer) handleStart(rw http.ResponseWriter, req *http.Request) {
 	}
 
 	// Start a new transaction, and record initial information about it.
-	data, err := rs.base.Start(req.Context(), req.Form["key"])
+	prefetch, err := parseKeys(req.Form["key"])
+	if err != nil {
+		rs.transactionMu.Unlock()
+		log.Println(err)
+		rw.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	data, err := rs.base.Start(req.Context(), prefetch)
 	if err != nil {
 		rs.transactionMu.Unlock()
 		log.Println(err)
@@ -474,7 +497,13 @@ func (rs *remoteServer) handleGet(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	data, err := rs.base.GetMany(req.Context(), req.Form["key"])
+	keys, err := parseKeys(req.Form["key"])
+	if err != nil {
+		log.Println(err)
+		rw.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	data, err := rs.base.GetMany(req.Context(), keys)
 	if err != nil {
 		log.Println(err)
 		rw.WriteHeader(http.StatusInternalServerError)
@@ -505,7 +534,7 @@ func (rs *remoteServer) handleCommit(rw http.ResponseWriter, req *http.Request) 
 		rw.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	writes := make(map[string]WriteData)
+	writes := make(map[uint64]WriteData)
 	for key, val := range data {
 		writes[key] = WriteData{val[1:], DataType(val[0])}
 	}

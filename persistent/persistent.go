@@ -5,6 +5,7 @@ package persistent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 )
 
@@ -49,14 +50,14 @@ type ReliableStorage interface {
 	// this is called, and will stop working again after Commit is called.
 	//
 	// Transactions are isolated and atomic.
-	Start(ctx context.Context, prefetch []string) (data map[string][]byte, err error)
+	Start(ctx context.Context, prefetch []uint64) (data map[uint64][]byte, err error)
 
-	Get(ctx context.Context, key string) (data []byte, err error)
-	GetMany(ctx context.Context, keys []string) (data map[string][]byte, err error)
+	Get(ctx context.Context, key uint64) (data []byte, err error)
+	GetMany(ctx context.Context, keys []uint64) (data map[uint64][]byte, err error)
 
 	// Commit persists the changes in `writes` to the backend, atomically. If
 	// the value of a key is nil, then that key is deleted.
-	Commit(ctx context.Context, writes map[string]WriteData) error
+	Commit(ctx context.Context, writes map[uint64]WriteData) error
 }
 
 // BlockStorage is a derivative of ObjectStorage that uses uint64 pointers as
@@ -133,6 +134,10 @@ func dup(in []byte) []byte {
 	out := make([]byte, len(in))
 	copy(out, in)
 	return out
+}
+
+func hex(key uint64) string {
+	return fmt.Sprintf("%x", key)
 }
 
 // The functions below are all for left-balanced binary tree math. They're taken

@@ -17,16 +17,16 @@ func NewSimpleReliable(base ObjectStorage) ReliableStorage {
 	return &simpleReliable{base}
 }
 
-func (sr *simpleReliable) Start(ctx context.Context, prefetch []string) (map[string][]byte, error) {
+func (sr *simpleReliable) Start(ctx context.Context, prefetch []uint64) (map[uint64][]byte, error) {
 	return sr.GetMany(ctx, prefetch)
 }
 
-func (sr *simpleReliable) Get(ctx context.Context, key string) ([]byte, error) {
-	return sr.base.Get(ctx, key)
+func (sr *simpleReliable) Get(ctx context.Context, key uint64) ([]byte, error) {
+	return sr.base.Get(ctx, hex(key))
 }
 
-func (sr *simpleReliable) GetMany(ctx context.Context, keys []string) (map[string][]byte, error) {
-	out := make(map[string][]byte)
+func (sr *simpleReliable) GetMany(ctx context.Context, keys []uint64) (map[uint64][]byte, error) {
+	out := make(map[uint64][]byte)
 	for _, key := range keys {
 		val, err := sr.Get(ctx, key)
 		if err == ErrObjectNotFound {
@@ -39,9 +39,9 @@ func (sr *simpleReliable) GetMany(ctx context.Context, keys []string) (map[strin
 	return out, nil
 }
 
-func (sr *simpleReliable) Commit(ctx context.Context, writes map[string]WriteData) error {
+func (sr *simpleReliable) Commit(ctx context.Context, writes map[uint64]WriteData) error {
 	for key, wr := range writes {
-		if err := sr.base.Set(ctx, key, wr.Data, wr.Type); err != nil {
+		if err := sr.base.Set(ctx, hex(key), wr.Data, wr.Type); err != nil {
 			panic(err)
 		}
 	}
@@ -62,9 +62,9 @@ func NewCache(base ReliableStorage, size int) ReliableStorage {
 	}
 }
 
-func (c *cacheStorage) filterCached(keys []string) (out map[string][]byte, remaining []string) {
-	out = make(map[string][]byte)
-	remaining = make([]string, 0)
+func (c *cacheStorage) filterCached(keys []uint64) (out map[uint64][]byte, remaining []uint64) {
+	out = make(map[uint64][]byte)
+	remaining = make([]uint64, 0)
 
 	for _, key := range keys {
 		val, ok := c.cache.Get(key)
@@ -78,14 +78,14 @@ func (c *cacheStorage) filterCached(keys []string) (out map[string][]byte, remai
 	return
 }
 
-func (c *cacheStorage) cacheAndOutput(data, out map[string][]byte) {
+func (c *cacheStorage) cacheAndOutput(data, out map[uint64][]byte) {
 	for key, val := range data {
 		out[key] = val
 		c.cache.Set(key, dup(val), cache.NoExpiration)
 	}
 }
 
-func (c *cacheStorage) Start(ctx context.Context, prefetch []string) (map[string][]byte, error) {
+func (c *cacheStorage) Start(ctx context.Context, prefetch []uint64) (map[uint64][]byte, error) {
 	out, remaining := c.filterCached(prefetch)
 
 	data, err := c.base.Start(ctx, remaining)
@@ -97,8 +97,8 @@ func (c *cacheStorage) Start(ctx context.Context, prefetch []string) (map[string
 	return out, nil
 }
 
-func (c *cacheStorage) Get(ctx context.Context, key string) ([]byte, error) {
-	data, err := c.GetMany(ctx, []string{key})
+func (c *cacheStorage) Get(ctx context.Context, key uint64) ([]byte, error) {
+	data, err := c.GetMany(ctx, []uint64{key})
 	if err != nil {
 		return nil, err
 	} else if data[key] == nil {
@@ -107,7 +107,7 @@ func (c *cacheStorage) Get(ctx context.Context, key string) ([]byte, error) {
 	return data[key], nil
 }
 
-func (c *cacheStorage) GetMany(ctx context.Context, keys []string) (map[string][]byte, error) {
+func (c *cacheStorage) GetMany(ctx context.Context, keys []uint64) (map[uint64][]byte, error) {
 	out, remaining := c.filterCached(keys)
 
 	if len(remaining) > 0 {
@@ -121,13 +121,13 @@ func (c *cacheStorage) GetMany(ctx context.Context, keys []string) (map[string][
 	return out, nil
 }
 
-func (c *cacheStorage) skip(key string, data []byte) bool {
+func (c *cacheStorage) skip(key uint64, data []byte) bool {
 	cand, ok := c.cache.Get(key)
 	return ok && bytes.Equal(cand.([]byte), data)
 }
 
-func (c *cacheStorage) Commit(ctx context.Context, writes map[string]WriteData) error {
-	dedupedWrites := make(map[string]WriteData)
+func (c *cacheStorage) Commit(ctx context.Context, writes map[uint64]WriteData) error {
+	dedupedWrites := make(map[uint64]WriteData)
 	for key, wr := range writes {
 		if c.skip(key, wr.Data) {
 			continue
