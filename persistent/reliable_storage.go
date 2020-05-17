@@ -148,3 +148,22 @@ func (c *cacheStorage) Commit(ctx context.Context, writes map[uint64]WriteData) 
 	}
 	return nil
 }
+
+type blockReliable struct {
+	BlockStorage
+}
+
+// NewBlockReliable returns a ReliableStorage implementation based on a
+// BlockStorage implementation.
+func NewBlockReliable(base BlockStorage) ReliableStorage {
+	return &blockReliable{base}
+}
+
+func (br *blockReliable) Commit(ctx context.Context, writes map[uint64]WriteData) error {
+	for ptr, wd := range writes {
+		if err := br.Set(ctx, ptr, wd.Data, wd.Type); err != nil {
+			return err
+		}
+	}
+	return br.BlockStorage.Commit(ctx)
+}

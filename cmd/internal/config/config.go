@@ -14,6 +14,10 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+func maxSize(numPtrs, dataSize int64) int64 {
+	return (8 * numPtrs) + 3 + dataSize
+}
+
 type StorageProvider struct {
 	B2AcctId string `yaml:"b2-acct-id"`
 	B2AppKey string `yaml:"b2-app-key"`
@@ -115,6 +119,7 @@ type Client struct {
 	DataSize int64 `yaml:"data-size"` // Amount of data kept in each of a file's blocks. Default: 32 KiB
 
 	Archive bool `yaml:"archive"` // Whether or not to enforce archive mode.
+	ORAM    bool `yaml:"oram"`    // Whether or not to use ORAM.
 }
 
 func ClientFromFile(path string) (*Client, error) {
@@ -192,12 +197,16 @@ func (c *Client) remoteStorage() (persistent.ReliableStorage, error) {
 		return nil, fmt.Errorf("cannot set storage-provider with remote-server")
 	} else if c.MaxWALSize != 0 {
 		return nil, fmt.Errorf("cannot set max-wal-size with remote-server")
+	} else if c.WALParallelism != 0 {
+		return nil, fmt.Errorf("cannot set wal-parallelism with remote-server")
 	} else if c.DiskCacheSize != 0 {
-		return nil, fmt.Errorf("cannot set disk-cache-size along with remote-server")
+		return nil, fmt.Errorf("cannot set disk-cache-size with remote-server")
+	} else if c.DiskCacheLoc != "" {
+		return nil, fmt.Errorf("cannot set disk-cache-loc with remote-server")
 	} else if c.MemCacheSize != 0 {
-		return nil, fmt.Errorf("cannot set mem-cache-size along with remote-server")
+		return nil, fmt.Errorf("cannot set mem-cache-size with remote-server")
 	} else if c.KeepMetadata {
-		return nil, fmt.Errorf("cannot set keep-metadata along with remote-server")
+		return nil, fmt.Errorf("cannot set keep-metadata with remote-server")
 	} else if c.RemoteServer.TransportKey == "" {
 		return nil, fmt.Errorf("no transport key was given for remote server")
 	} else if c.RemoteServer.TransportKey == c.Password {
@@ -246,22 +255,48 @@ func (c *Client) FS(mountPath string) (*utahfs.BlockFilesystem, error) {
 	}
 	block = persistent.WithEncryption(block, c.Password)
 
-	// Setup application storage.
-	appStore := persistent.NewAppStorage(block)
-
-	// Setup block-based filesystem.
+	// Configure defaults for the block-based filesystem. Do this early because
+	// the numbers might be needed for ORAM.
 	if c.NumPtrs == 0 {
 		c.NumPtrs = 12
 	}
 	if c.DataSize == 0 {
 		c.DataSize = 32 * 1024
 	}
-	bfs, err := utahfs.NewBlockFilesystem(appStore, c.NumPtrs, c.DataSize, true)
+
+	// Setup ORAM if desired.
+	if c.ORAM && c.RemoteServer == nil {
+		if c.KeepMetadata {
+			return nil, fmt.Errorf("cannot set keep-metadata with oram enabled")
+		}
+
+		ostore, err := persistent.NewLocalOblivious(path.Join(c.DataDir, "oram"))
+		if err != nil {
+			return nil, err
+		}
+		block, err = persistent.WithORAM(block, ostore, maxSize(c.NumPtrs, c.DataSize))
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Setup application storage.
+	appStore := persistent.NewAppStorage(block)
+
+	// Setup block-based filesystem.
+	bfs, err := utahfs.NewBlockFilesystem(appStore, c.NumPtrs, c.DataSize, !c.ORAM)
 	if err != nil {
 		return nil, err
 	}
 
 	return bfs, nil
+}
+
+type ORAMConfig struct {
+	Key string `yaml:"key"` // Fixed key for encrypting ORAM blocks before being sent to the remote storage provider.
+
+	NumPtrs  int64 `yaml:"num-ptrs"`  // Should be the same as num-ptrs in the client-side config.
+	DataSize int64 `yaml:"data-size"` // Should be the same as data-size in the client-side config.
 }
 
 type Server struct {
@@ -275,6 +310,8 @@ type Server struct {
 	DiskCacheLoc   string `yaml:"disk-cache-loc"`  // Special location for on-disk LRU cache. Default is to store cache inside data-dir.
 	MemCacheSize   int    `yaml:"mem-cache-size"`  // Size of in-memory LRU cache. Default: 32*1024 blocks, -1 to disable.
 	KeepMetadata   bool   `yaml:"keep-metadata"`   // Keep a local copy of metadata, always. Default: false.
+
+	ORAM *ORAMConfig `yaml:"oram"` // Provided if ORAM should be used on the server-side.
 
 	TransportKey string `yaml:"transport-key"` // Pre-shared key for authenticating client and server.
 }
@@ -348,6 +385,34 @@ func (s *Server) Server() (*http.Server, error) {
 	}
 	if s.MemCacheSize != -1 {
 		relStore = persistent.NewCache(relStore, s.MemCacheSize)
+	}
+
+	// Setup ORAM if desired.
+	if s.ORAM != nil {
+		if s.KeepMetadata {
+			return nil, fmt.Errorf("cannot set keep-metadata with oram enabled")
+		}
+		// Setup defaults.
+		if s.ORAM.NumPtrs == 0 {
+			s.ORAM.NumPtrs = 12
+		}
+		if s.ORAM.DataSize == 0 {
+			s.ORAM.DataSize = 32 * 1024
+		}
+
+		ostore, err := persistent.NewLocalOblivious(path.Join(s.DataDir, "oram"))
+		if err != nil {
+			return nil, err
+		}
+		block, err := persistent.WithORAM(
+			persistent.WithEncryption(
+				persistent.NewBufferedStorage(relStore),
+				s.ORAM.Key,
+			),
+			ostore,
+			maxSize(s.ORAM.NumPtrs, s.ORAM.DataSize),
+		)
+		relStore = persistent.NewBlockReliable(block)
 	}
 
 	// Setup the server we want to expose.

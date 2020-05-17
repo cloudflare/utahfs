@@ -33,6 +33,10 @@ Features
    overwriting existing files, while still allowing new files to be created and
    old files to be moved around. This helps protect against accidental data
    loss.
+5. **Oblivious RAM (ORAM).**  ORAM can be used to hide the access pattern of
+   data from the cloud storage provider, so the provider only sees the *amount*
+   data is accessed. *(Access pattern: Which pieces of data are being accessed,
+   and whether the access was a read or write.)*
 
 
 How to Use
@@ -44,12 +48,7 @@ Setup documentation can be found in the `docs/` folder.
 Future Work
 -----------
 
-1. **Oblivious RAM (ORAM).**  ORAM would be used, along with local hardware, to
-   hide the access pattern of data from the cloud storage provider as well, so
-   the provider only sees the *amount* data is accessed. *(Access pattern: Which
-   pieces of data are being accessed, and whether the access was a read or
-   write.)*
-2. **Reliability strategies for the WAL.** Changes are buffered in a local
+1. **Reliability strategies for the WAL.** Changes are buffered in a local
    Write-Ahead Log (WAL) before being sent to the cloud storage provider. If the
    disk that the WAL is stored on fails, it could become very difficult to
    return the archive to a usable, partially-regressed state.
