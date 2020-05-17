@@ -20,19 +20,18 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/sha1"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 
-	"golang.org/x/crypto/pbkdf2"
+	"golang.org/x/crypto/argon2"
 )
 
 func generateConfig(transportKey, hostname string) (*tls.Config, error) {
 	curve := elliptic.P256()
 
 	// Generate root CA certificate.
-	key := pbkdf2.Key([]byte(transportKey), []byte("da61d4a0469fdb7f"), 4096, 32, sha1.New)
+	key := argon2.IDKey([]byte(transportKey), []byte("da61d4a0469fdb7f"), 1, 64*1024, 4, 32)
 	caD := new(big.Int).SetBytes(key)
 	caD.Mod(caD, curve.Params().N)
 	caPriv := &ecdsa.PrivateKey{D: caD}

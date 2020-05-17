@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
-	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
@@ -16,7 +15,7 @@ import (
 	"path"
 	"time"
 
-	"golang.org/x/crypto/pbkdf2"
+	"golang.org/x/crypto/argon2"
 )
 
 // treeHead is the authenticated head of the Merkle tree built over the user's
@@ -180,7 +179,7 @@ type integrity struct {
 // The root of the Merkle tree is authenticated by `password`, and a copy of the
 // root and other metadata is kept in `pinFile`.
 func WithIntegrity(base BlockStorage, password, pinFile string) (BlockStorage, error) {
-	key := pbkdf2.Key([]byte(password), []byte("534ffca65b68a9b3"), 4096, 32, sha1.New)
+	key := argon2.IDKey([]byte(password), []byte("534ffca65b68a9b3"), 1, 64*1024, 4, 32)
 	mac := hmac.New(sha256.New, key)
 
 	pinned, err := readPinFile(pinFile, mac)

@@ -262,13 +262,12 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:9febad105aad8833b77cbc321da08f3b7b7f3c0f7682763b52a0f69725cfbd22"
+  digest = "1:252d50c8e2b125a0c49310b3fb9701318330c19e73a3af0fafeb996cb5efdfdc"
   name = "golang.org/x/crypto"
   packages = [
     "argon2",
     "blake2b",
     "hkdf",
-    "pbkdf2",
     "ssh/terminal",
   ]
   pruneopts = "UT"
@@ -576,7 +575,6 @@
     "github.com/prometheus/client_golang/prometheus/promhttp",
     "golang.org/x/crypto/argon2",
     "golang.org/x/crypto/hkdf",
-    "golang.org/x/crypto/pbkdf2",
     "golang.org/x/crypto/ssh/terminal",
     "gopkg.in/kothar/go-backblaze.v0",
     "gopkg.in/yaml.v2",
