@@ -169,6 +169,7 @@ type remoteClient struct {
 
 	serverUrl *url.URL
 	client    *http.Client
+	oram      bool
 
 	id string
 }
@@ -177,7 +178,7 @@ type remoteClient struct {
 // and writes to a remote server.
 //
 // The corresponding server implementation is in NewRemoteServer.
-func NewRemoteClient(transportKey, serverUrl string) (ReliableStorage, error) {
+func NewRemoteClient(transportKey, serverUrl string, oram bool) (ReliableStorage, error) {
 	parsed, err := url.Parse(serverUrl)
 	if err != nil {
 		return nil, err
@@ -216,6 +217,7 @@ func NewRemoteClient(transportKey, serverUrl string) (ReliableStorage, error) {
 	rc := &remoteClient{
 		serverUrl: parsed,
 		client:    client,
+		oram:      oram,
 	}
 	go rc.maintain()
 	return rc, nil
@@ -317,6 +319,9 @@ func (rc *remoteClient) Start(ctx context.Context, prefetch []uint64) (map[uint6
 	for _, key := range prefetch {
 		loc += "&key=" + hex(key)
 	}
+	if rc.oram {
+		loc += "&oram=true"
+	}
 	data, err := rc.get(ctx, loc)
 	if err != nil {
 		return nil, err
@@ -384,18 +389,19 @@ type remoteServer struct {
 	lastCheckIn   time.Time
 
 	base ReliableStorage
+	oram bool
 }
 
 // NewRemoteServer wraps a ReliableStorage implementation in an HTTP handler,
 // allowing remote clients to make requests to it.
 //
 // The corresponding client implementation is in NewRemoteClient.
-func NewRemoteServer(base ReliableStorage, transportKey string) (*http.Server, error) {
+func NewRemoteServer(base ReliableStorage, transportKey string, oram bool) (*http.Server, error) {
 	cfg, err := generateConfig(transportKey, "utahfs-server")
 	if err != nil {
 		return nil, err
 	}
-	rs := &remoteServer{base: base}
+	rs := &remoteServer{base: base, oram: oram}
 	go rs.maintain()
 
 	return &http.Server{
@@ -464,6 +470,15 @@ func (rs *remoteServer) handleStart(rw http.ResponseWriter, req *http.Request) {
 		rs.transactionMu.Unlock()
 		return
 	default:
+	}
+
+	// Ensure that server and client agree on the use of ORAM.
+	clientORAM := req.Form.Get("oram") == "true"
+	if rs.oram != clientORAM {
+		rs.transactionMu.Unlock()
+		log.Println("client and server disagree on whether oram is enabled")
+		rw.WriteHeader(http.StatusInternalServerError)
+		return
 	}
 
 	// Start a new transaction, and record initial information about it.

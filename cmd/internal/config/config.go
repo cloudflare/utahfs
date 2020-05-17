@@ -212,7 +212,7 @@ func (c *Client) remoteStorage() (persistent.ReliableStorage, error) {
 	} else if c.RemoteServer.TransportKey == c.Password {
 		return nil, fmt.Errorf("transport key should be generated independently of the encryption password")
 	}
-	return persistent.NewRemoteClient(c.RemoteServer.TransportKey, c.RemoteServer.URL)
+	return persistent.NewRemoteClient(c.RemoteServer.TransportKey, c.RemoteServer.URL, c.ORAM)
 }
 
 func (c *Client) FS(mountPath string) (*utahfs.BlockFilesystem, error) {
@@ -419,5 +419,5 @@ func (s *Server) Server() (*http.Server, error) {
 	if s.TransportKey == "" {
 		return nil, fmt.Errorf("no transport key was given for remote clients")
 	}
-	return persistent.NewRemoteServer(relStore, s.TransportKey)
+	return persistent.NewRemoteServer(relStore, s.TransportKey, s.ORAM != nil)
 }
