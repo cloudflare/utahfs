@@ -53,7 +53,7 @@ func NewLocalWAL(base ObjectStorage, loc string, maxSize, parallelism int) (Reli
 	if err != nil {
 		return nil, err
 	}
-	_, err = local.Exec("CREATE TABLE IF NOT EXISTS wal (key integer not null primary key, val bytea, dt integer)")
+	_, err = local.Exec("CREATE TABLE IF NOT EXISTS wal (id integer primary key autoincrement, key integer, val bytea, dt integer, UNIQUE(key))")
 	if err != nil {
 		return nil, err
 	}
@@ -128,25 +128,28 @@ func (lw *localWAL) drainOnce() error {
 
 	for {
 		var (
+			ids  []int64
 			keys []uint64
 			vals [][]byte
 			dts  []DataType
 		)
 
-		rows, err := lw.local.Query("SELECT key, val, dt FROM wal LIMIT 100")
+		rows, err := lw.local.Query("SELECT id, key, val, dt FROM wal LIMIT 100")
 		if err != nil {
 			return err
 		}
 		for rows.Next() {
 			var (
+				id  int64
 				key uint64
 				val []byte
 				dt  DataType
 			)
-			if err := rows.Scan(&key, &val, &dt); err != nil {
+			if err := rows.Scan(&id, &key, &val, &dt); err != nil {
 				rows.Close()
 				return err
 			}
+			ids = append(ids, id)
 			keys = append(keys, key)
 			vals = append(vals, val)
 			dts = append(dts, dt)
@@ -156,16 +159,16 @@ func (lw *localWAL) drainOnce() error {
 			return err
 		}
 		rows.Close()
-		if len(keys) == 0 {
+		if len(ids) == 0 {
 			return nil
 		}
 
 		// Write entries read from the WAL to the underlying storage. This is
 		// done outside of the database query to prevent blocking other threads.
-		for i, _ := range keys {
+		for i, _ := range ids {
 			reqs <- walReq{keys[i], vals[i], dts[i]}
 		}
-		for range keys {
+		for range ids {
 			if subErr := <-errs; subErr != nil {
 				err = subErr
 			}
@@ -174,11 +177,11 @@ func (lw *localWAL) drainOnce() error {
 			return err
 		}
 
-		keyStrs := make([]string, 0, len(keys))
-		for _, key := range keys {
-			keyStrs = append(keyStrs, fmt.Sprint(key))
+		idStrs := make([]string, 0, len(ids))
+		for _, id := range ids {
+			idStrs = append(idStrs, fmt.Sprint(id))
 		}
-		_, err = lw.local.Exec("DELETE FROM wal WHERE key in (" + strings.Join(keyStrs, ",") + ")")
+		_, err = lw.local.Exec("DELETE FROM wal WHERE id in (" + strings.Join(idStrs, ",") + ")")
 		if err != nil {
 			return err
 		}

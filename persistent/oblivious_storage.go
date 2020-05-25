@@ -308,6 +308,9 @@ func (lo *localOblivious) Commit(ctx context.Context, version uint64, stash map[
 }
 
 func (lo *localOblivious) Rollback(ctx context.Context) {
+	if lo.tx == nil {
+		return
+	}
 	lo.tx.Rollback()
 	lo.tx = nil
 	lo.version = 0
