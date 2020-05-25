@@ -32,6 +32,8 @@ type StorageProvider struct {
 
 	GCSBucketName string `yaml:"gcs-bucket-name"`
 
+	DiskPath string `yaml:"disk-path"`
+
 	Retry int `yaml:"retry"` // Max number of times to retry reqs that fail.
 }
 
@@ -47,6 +49,8 @@ func (sp *StorageProvider) hasGCS() bool {
 	return sp.GCSBucketName != ""
 }
 
+func (sp *StorageProvider) hasDisk() bool { return sp.DiskPath != "" }
+
 func (sp *StorageProvider) hasMultiple() bool {
 	count := 0
 	if sp.hasB2() {
@@ -58,11 +62,14 @@ func (sp *StorageProvider) hasMultiple() bool {
 	if sp.hasGCS() {
 		count++
 	}
+	if sp.hasDisk() {
+		count++
+	}
 	return count > 1
 }
 
 func (sp *StorageProvider) Store() (persistent.ObjectStorage, error) {
-	if sp == nil || !sp.hasB2() && !sp.hasS3() && !sp.hasGCS() {
+	if sp == nil || !sp.hasB2() && !sp.hasS3() && !sp.hasGCS() && !sp.hasDisk() {
 		return nil, fmt.Errorf("no object storage provider defined")
 	} else if sp.hasMultiple() {
 		return nil, fmt.Errorf("only one object storage provider may be defined")
@@ -79,6 +86,8 @@ func (sp *StorageProvider) Store() (persistent.ObjectStorage, error) {
 		out, err = persistent.NewS3(sp.S3AppId, sp.S3AppKey, sp.S3Bucket, sp.S3Url, sp.S3Region)
 	} else if sp.hasGCS() {
 		out, err = persistent.NewGCS(sp.GCSBucketName)
+	} else if sp.hasDisk() {
+		out, err = persistent.NewDisk(sp.DiskPath)
 	}
 	if err != nil {
 		return nil, err
