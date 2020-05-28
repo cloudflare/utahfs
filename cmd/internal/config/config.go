@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"path"
 	"syscall"
@@ -15,7 +16,10 @@ import (
 )
 
 func maxSize(numPtrs, dataSize int64) int64 {
-	return (8 * numPtrs) + 3 + dataSize
+	//  8 = size of a single pointer
+	//  3 = size of length field before data
+	// 28 = encryption overhead
+	return (8 * numPtrs) + (3 + dataSize) + 28
 }
 
 type StorageProvider struct {
@@ -258,9 +262,13 @@ func (c *Client) FS(mountPath string) (*utahfs.BlockFilesystem, error) {
 		}
 		c.Password = string(password)
 	}
-	block, err = persistent.WithIntegrity(block, c.Password, path.Join(c.DataDir, "pin.json"))
-	if err != nil {
-		return nil, err
+	if !c.ORAM || c.RemoteServer == nil {
+		block, err = persistent.WithIntegrity(block, c.Password, path.Join(c.DataDir, "pin.json"))
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		log.Println("WARNING: delegating rollback prevention to remote server because ORAM is enabled")
 	}
 	block = persistent.WithEncryption(block, c.Password)
 
@@ -275,10 +283,9 @@ func (c *Client) FS(mountPath string) (*utahfs.BlockFilesystem, error) {
 
 	// Setup ORAM if desired.
 	if c.ORAM && c.RemoteServer == nil {
-		if c.KeepMetadata {
-			return nil, fmt.Errorf("cannot set keep-metadata with oram enabled")
+		if c.StorageProvider.hasDisk() {
+			log.Println("WARNING: ORAM provides no security properties when used with disk storage")
 		}
-
 		ostore, err := persistent.NewLocalOblivious(path.Join(c.DataDir, "oram"))
 		if err != nil {
 			return nil, err
@@ -398,8 +405,8 @@ func (s *Server) Server() (*http.Server, error) {
 
 	// Setup ORAM if desired.
 	if s.ORAM != nil {
-		if s.KeepMetadata {
-			return nil, fmt.Errorf("cannot set keep-metadata with oram enabled")
+		if s.StorageProvider.hasDisk() {
+			log.Println("WARNING: ORAM provides no security properties when used with disk storage")
 		}
 		// Setup defaults.
 		if s.ORAM.NumPtrs == 0 {
@@ -413,14 +420,22 @@ func (s *Server) Server() (*http.Server, error) {
 		if err != nil {
 			return nil, err
 		}
-		block, err := persistent.WithORAM(
-			persistent.WithEncryption(
-				persistent.NewBufferedStorage(relStore),
-				s.ORAM.Key,
-			),
+		block, err := persistent.WithIntegrity(
+			persistent.NewBufferedStorage(relStore),
+			s.ORAM.Key,
+			path.Join(s.DataDir, "pin.json"),
+		)
+		if err != nil {
+			return nil, err
+		}
+		block, err = persistent.WithORAM(
+			persistent.WithEncryption(block, s.ORAM.Key),
 			ostore,
 			maxSize(s.ORAM.NumPtrs, s.ORAM.DataSize),
 		)
+		if err != nil {
+			return nil, err
+		}
 		relStore = persistent.NewBlockReliable(block)
 	}
 

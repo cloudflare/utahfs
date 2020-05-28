@@ -127,7 +127,7 @@ func NewLocalOblivious(loc string) (ObliviousStorage, error) {
 }
 
 func (lo *localOblivious) Start(ctx context.Context, version uint64) (map[uint64][]byte, uint64, error) {
-	tx, err := lo.db.BeginTx(ctx, nil)
+	tx, err := lo.db.BeginTx(context.Background(), nil)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -265,9 +265,6 @@ func (lo *localOblivious) Commit(ctx context.Context, version uint64, stash map[
 	if version < lo.version {
 		return fmt.Errorf("oblivious: cannot commit at lower version number than before")
 	} else if version == lo.version {
-		if len(stash) > 0 || len(assignments) > 0 {
-			return fmt.Errorf("oblivious: cannot commit at same version number as before, but with changes")
-		}
 		lo.Rollback(ctx)
 		return nil
 	}
