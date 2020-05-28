@@ -86,7 +86,7 @@ func (e *encryption) decrypt(ptr uint64, raw []byte) ([]byte, error) {
 	// Decrypt the given data.
 	ns := aead.NonceSize()
 	if len(raw) < ns {
-		return nil, fmt.Errorf("storage: ciphertext is too small")
+		return nil, fmt.Errorf("ciphertext is too small")
 	}
 	val, err := aead.Open(nil, raw[:ns], raw[ns:], tag)
 	if err != nil {
@@ -97,10 +97,20 @@ func (e *encryption) decrypt(ptr uint64, raw []byte) ([]byte, error) {
 }
 
 func (e *encryption) Start(ctx context.Context, prefetch []uint64) (map[uint64][]byte, error) {
-	if len(prefetch) > 0 {
-		return nil, fmt.Errorf("encryption: prefetch is not supported")
+	data, err := e.base.Start(ctx, prefetch)
+	if err != nil {
+		return nil, err
 	}
-	return e.base.Start(ctx, nil)
+
+	out := make(map[uint64][]byte)
+	for ptr, raw := range data {
+		val, err := e.decrypt(ptr, raw)
+		if err != nil {
+			return nil, fmt.Errorf("encryption: failed to decrypt block %x: %v", ptr, err)
+		}
+		out[ptr] = val
+	}
+	return out, nil
 }
 
 func (e *encryption) Get(ctx context.Context, ptr uint64) ([]byte, error) {
@@ -123,7 +133,7 @@ func (e *encryption) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]b
 	for ptr, raw := range data {
 		val, err := e.decrypt(ptr, raw)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("encryption: failed to decrypt block %x: %v", ptr, err)
 		}
 		out[ptr] = val
 	}
@@ -133,7 +143,7 @@ func (e *encryption) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]b
 func (e *encryption) Set(ctx context.Context, ptr uint64, data []byte, dt DataType) error {
 	ct, err := e.encrypt(ptr, data)
 	if err != nil {
-		return err
+		return fmt.Errorf("encryption: failed to encrypt: %v", err)
 	}
 	return e.base.Set(ctx, ptr, ct, dt)
 }
