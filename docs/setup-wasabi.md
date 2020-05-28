@@ -12,3 +12,6 @@ Setup Wasabi
    [this](https://wasabi-support.zendesk.com/hc/en-us/articles/360015106031-What-are-the-service-URLs-for-Wasabi-s-different-regions-)
    support page. Prefix it with "https://" and save it as `s3-url` in your
    config.
+
+Note that all the configuration options set here are kept under a
+`storage-provider` key.
