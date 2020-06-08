@@ -52,7 +52,7 @@ After this, the next step is to actually run the UtahFS client. Install it, if
 you haven't already:
 
 ```
-$ go install github.com/cloudflare/utahfs/cmd/utahfs-client
+$ go get github.com/cloudflare/utahfs/cmd/utahfs-client
 ```
 
 and run it with:
@@ -117,7 +117,7 @@ If you're going to be using Oblivious RAM, uncomment the two lines starting with
 Install the server, if you haven't already:
 
 ```
-$ go install github.com/cloudflare/utahfs/cmd/utahfs-server
+$ go get github.com/cloudflare/utahfs/cmd/utahfs-server
 ```
 
 and run it with:
@@ -149,7 +149,7 @@ Single-Device Setup for information about `password`, `archive`, and `oram`.
 Finally, install the UtahFS client, if you haven't already:
 
 ```
-$ go install github.com/cloudflare/utahfs/cmd/utahfs-client
+$ go get github.com/cloudflare/utahfs/cmd/utahfs-client
 ```
 
 and run it with:
