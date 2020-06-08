@@ -10,7 +10,7 @@ import (
 	"log"
 	"os"
 
-	"code.cfops.it/~brendan/utahfs/cmd/internal/config"
+	"github.com/cloudflare/utahfs/cmd/internal/config"
 )
 
 func main() {

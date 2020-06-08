@@ -8,8 +8,8 @@ import (
 	"path"
 	"syscall"
 
-	"code.cfops.it/~brendan/utahfs"
-	"code.cfops.it/~brendan/utahfs/persistent"
+	"github.com/cloudflare/utahfs"
+	"github.com/cloudflare/utahfs/persistent"
 
 	"golang.org/x/crypto/ssh/terminal"
 	"gopkg.in/yaml.v2"

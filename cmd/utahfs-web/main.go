@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"os"
 
-	"code.cfops.it/~brendan/utahfs"
-	"code.cfops.it/~brendan/utahfs/cmd/internal/config"
+	"github.com/cloudflare/utahfs"
+	"github.com/cloudflare/utahfs/cmd/internal/config"
 )
 
 func main() {

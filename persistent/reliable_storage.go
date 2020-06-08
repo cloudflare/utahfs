@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 
-	"code.cfops.it/~brendan/utahfs/cache"
+	"github.com/cloudflare/utahfs/cache"
 )
 
 type simpleReliable struct {

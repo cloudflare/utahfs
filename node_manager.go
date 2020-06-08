@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
-	"code.cfops.it/~brendan/utahfs/cache"
-	"code.cfops.it/~brendan/utahfs/persistent"
+	"github.com/cloudflare/utahfs/cache"
+	"github.com/cloudflare/utahfs/persistent"
 
 	"github.com/jacobsa/fuse/fuseops"
 	"github.com/jacobsa/fuse/fuseutil"
