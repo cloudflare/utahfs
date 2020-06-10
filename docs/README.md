@@ -73,7 +73,7 @@ Multi-Device Setup
 
 This section describes the setup process for Multi-Device Mode. In this mode,
 the user needs to run a server process on trusted hardware. For example, a
-Rasberry Pi or Intel NUC on their LAN are good candidates. The users' devices
+Raspberry Pi or Intel NUC on their LAN are good candidates. The users' devices
 interact only with the server, and the server handles uploads / downloads with
 the cloud storage provider. This allows many users to work on the same archive
 at once and can improve user-perceived performance.
