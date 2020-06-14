@@ -58,6 +58,7 @@ func main() {
 		FSName:      volume,
 		ErrorLogger: log.New(os.Stderr, "fuse: ", log.Flags()),
 		VolumeName:  volume,
+		Subtype:     "utahfs",
 	}
 	if *verbose {
 		mountCfg.DebugLogger = log.New(os.Stderr, "fuse-debug: ", log.Flags())
