@@ -13,10 +13,8 @@ Setup Google Cloud Storage
    Account". Configure the account and click "Create." Give the "Storage Admin"
    permission and click "Continue." Once finished, choose "Create Key" with key
    type "JSON" and save the provided file to disk.
-5. Ensure that a path to this file is given in the
-   `GOOGLE_APPLICATION_CREDENTIALS` environment variable, either when the server
-   process runs in multi-device mode, or when the client process runs in
-   single-device mode.
+5. Set the path to the credentials file as `gcs-credentials-path` in your
+   config.
 
-Note that the configuration option set here is kept under a `storage-provider`
+Note that the configuration options set here are kept under a `storage-provider`
 key.
