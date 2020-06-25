@@ -46,14 +46,14 @@ func (a archive) WriteFile(ctx context.Context, op *fuseops.WriteFileOp) error {
 // checkForChanges ensures that `op` won't modify any already-written parts of
 // the file stored by `nd`.
 func checkForChanges(nd *node, op *fuseops.WriteFileOp) error {
-	max := op.Offset + int64(len(op.Data))
-	if int64(nd.Attrs.Size) < max {
-		max = int64(nd.Attrs.Size)
-	}
+	max := min(
+		op.Offset+int64(len(op.Data)),
+		int64(nd.Attrs.Size),
+	)
 
 	pos := op.Offset
 	for pos < max {
-		temp := make([]byte, 32*1024)
+		temp := make([]byte, min(32*1024, max-pos))
 		n, err := nd.ReadAt(temp, pos)
 		if err != nil {
 			return fmt.Errorf("utahfs: failed to check if operation modifies file: %v", err)
@@ -66,4 +66,11 @@ func checkForChanges(nd *node, op *fuseops.WriteFileOp) error {
 	}
 
 	return nil
+}
+
+func min(a, b int64) int64 {
+	if a < b {
+		return a
+	}
+	return b
 }
