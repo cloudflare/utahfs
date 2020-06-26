@@ -6,8 +6,7 @@ the user runs all of the code on their own machine and uploads directly to their
 configured cloud storage provider. Only this machine may interact with the
 archive.
 
-First, create an account with a cloud object storage provider. There are
-instructions on how to do this in the other files in this directory. Create a
+First, create an account with a cloud object storage provider. Create a
 configuration, which we'll call `utahfs.yaml`, with the following contents:
 
 ```yaml
@@ -33,7 +32,13 @@ keep-metadata: true
 ```
 
 and fill in the items under `storage-provider` with the credentials you got from
-your storage provider.
+your storage provider. Setup instructions for several storage providers are
+available at:
+
+- [Backblaze B2](setup-backblaze-b2.md)
+- [Google Cloud Storage](setup-gcs.md)
+- [Scaleway](setup-scaleway.md)
+- [Wasabi](setup-wasabi.md)
 
 The user can optionally set the encryption password in the configuration file by
 uncommenting the line `password: password123` and replacing `password123` with
