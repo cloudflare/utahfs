@@ -46,8 +46,7 @@ func convertInMessage(
 		buf := inMsg.ConsumeBytes(inMsg.Len())
 		n := len(buf)
 		if n == 0 || buf[n-1] != '\x00' {
-			err = errors.New("Corrupt OpLookup")
-			return
+			return nil, errors.New("Corrupt OpLookup")
 		}
 
 		o = &fuseops.LookUpInodeOp{
@@ -64,8 +63,7 @@ func convertInMessage(
 		type input fusekernel.SetattrIn
 		in := (*input)(inMsg.Consume(unsafe.Sizeof(input{})))
 		if in == nil {
-			err = errors.New("Corrupt OpSetattr")
-			return
+			return nil, errors.New("Corrupt OpSetattr")
 		}
 
 		to := &fuseops.SetInodeAttributesOp{
@@ -93,12 +91,16 @@ func convertInMessage(
 			to.Mtime = &t
 		}
 
+		if valid.Handle() {
+			t := fuseops.HandleID(in.Fh)
+			to.Handle = &t
+		}
+
 	case fusekernel.OpForget:
 		type input fusekernel.ForgetIn
 		in := (*input)(inMsg.Consume(unsafe.Sizeof(input{})))
 		if in == nil {
-			err = errors.New("Corrupt OpForget")
-			return
+			return nil, errors.New("Corrupt OpForget")
 		}
 
 		o = &fuseops.ForgetInodeOp{
@@ -109,15 +111,13 @@ func convertInMessage(
 	case fusekernel.OpMkdir:
 		in := (*fusekernel.MkdirIn)(inMsg.Consume(fusekernel.MkdirInSize(protocol)))
 		if in == nil {
-			err = errors.New("Corrupt OpMkdir")
-			return
+			return nil, errors.New("Corrupt OpMkdir")
 		}
 
 		name := inMsg.ConsumeBytes(inMsg.Len())
 		i := bytes.IndexByte(name, '\x00')
 		if i < 0 {
-			err = errors.New("Corrupt OpMkdir")
-			return
+			return nil, errors.New("Corrupt OpMkdir")
 		}
 		name = name[:i]
 
@@ -137,15 +137,13 @@ func convertInMessage(
 	case fusekernel.OpMknod:
 		in := (*fusekernel.MknodIn)(inMsg.Consume(fusekernel.MknodInSize(protocol)))
 		if in == nil {
-			err = errors.New("Corrupt OpMknod")
-			return
+			return nil, errors.New("Corrupt OpMknod")
 		}
 
 		name := inMsg.ConsumeBytes(inMsg.Len())
 		i := bytes.IndexByte(name, '\x00')
 		if i < 0 {
-			err = errors.New("Corrupt OpMknod")
-			return
+			return nil, errors.New("Corrupt OpMknod")
 		}
 		name = name[:i]
 
@@ -158,15 +156,13 @@ func convertInMessage(
 	case fusekernel.OpCreate:
 		in := (*fusekernel.CreateIn)(inMsg.Consume(fusekernel.CreateInSize(protocol)))
 		if in == nil {
-			err = errors.New("Corrupt OpCreate")
-			return
+			return nil, errors.New("Corrupt OpCreate")
 		}
 
 		name := inMsg.ConsumeBytes(inMsg.Len())
 		i := bytes.IndexByte(name, '\x00')
 		if i < 0 {
-			err = errors.New("Corrupt OpCreate")
-			return
+			return nil, errors.New("Corrupt OpCreate")
 		}
 		name = name[:i]
 
@@ -180,13 +176,11 @@ func convertInMessage(
 		// The message is "newName\0target\0".
 		names := inMsg.ConsumeBytes(inMsg.Len())
 		if len(names) == 0 || names[len(names)-1] != 0 {
-			err = errors.New("Corrupt OpSymlink")
-			return
+			return nil, errors.New("Corrupt OpSymlink")
 		}
 		i := bytes.IndexByte(names, '\x00')
 		if i < 0 {
-			err = errors.New("Corrupt OpSymlink")
-			return
+			return nil, errors.New("Corrupt OpSymlink")
 		}
 		newName, target := names[0:i], names[i+1:len(names)-1]
 
@@ -200,24 +194,20 @@ func convertInMessage(
 		type input fusekernel.RenameIn
 		in := (*input)(inMsg.Consume(unsafe.Sizeof(input{})))
 		if in == nil {
-			err = errors.New("Corrupt OpRename")
-			return
+			return nil, errors.New("Corrupt OpRename")
 		}
 
 		names := inMsg.ConsumeBytes(inMsg.Len())
 		// names should be "old\x00new\x00"
 		if len(names) < 4 {
-			err = errors.New("Corrupt OpRename")
-			return
+			return nil, errors.New("Corrupt OpRename")
 		}
 		if names[len(names)-1] != '\x00' {
-			err = errors.New("Corrupt OpRename")
-			return
+			return nil, errors.New("Corrupt OpRename")
 		}
 		i := bytes.IndexByte(names, '\x00')
 		if i < 0 {
-			err = errors.New("Corrupt OpRename")
-			return
+			return nil, errors.New("Corrupt OpRename")
 		}
 		oldName, newName := names[:i], names[i+1:len(names)-1]
 
@@ -232,8 +222,7 @@ func convertInMessage(
 		buf := inMsg.ConsumeBytes(inMsg.Len())
 		n := len(buf)
 		if n == 0 || buf[n-1] != '\x00' {
-			err = errors.New("Corrupt OpUnlink")
-			return
+			return nil, errors.New("Corrupt OpUnlink")
 		}
 
 		o = &fuseops.UnlinkOp{
@@ -245,8 +234,7 @@ func convertInMessage(
 		buf := inMsg.ConsumeBytes(inMsg.Len())
 		n := len(buf)
 		if n == 0 || buf[n-1] != '\x00' {
-			err = errors.New("Corrupt OpRmdir")
-			return
+			return nil, errors.New("Corrupt OpRmdir")
 		}
 
 		o = &fuseops.RmDirOp{
@@ -267,8 +255,7 @@ func convertInMessage(
 	case fusekernel.OpRead:
 		in := (*fusekernel.ReadIn)(inMsg.Consume(fusekernel.ReadInSize(protocol)))
 		if in == nil {
-			err = errors.New("Corrupt OpRead")
-			return
+			return nil, errors.New("Corrupt OpRead")
 		}
 
 		to := &fuseops.ReadFileOp{
@@ -281,8 +268,7 @@ func convertInMessage(
 		readSize := int(in.Size)
 		p := outMsg.GrowNoZero(readSize)
 		if p == nil {
-			err = fmt.Errorf("Can't grow for %d-byte read", readSize)
-			return
+			return nil, fmt.Errorf("Can't grow for %d-byte read", readSize)
 		}
 
 		sh := (*reflect.SliceHeader)(unsafe.Pointer(&to.Dst))
@@ -293,8 +279,7 @@ func convertInMessage(
 	case fusekernel.OpReaddir:
 		in := (*fusekernel.ReadIn)(inMsg.Consume(fusekernel.ReadInSize(protocol)))
 		if in == nil {
-			err = errors.New("Corrupt OpReaddir")
-			return
+			return nil, errors.New("Corrupt OpReaddir")
 		}
 
 		to := &fuseops.ReadDirOp{
@@ -307,8 +292,7 @@ func convertInMessage(
 		readSize := int(in.Size)
 		p := outMsg.GrowNoZero(readSize)
 		if p == nil {
-			err = fmt.Errorf("Can't grow for %d-byte read", readSize)
-			return
+			return nil, fmt.Errorf("Can't grow for %d-byte read", readSize)
 		}
 
 		sh := (*reflect.SliceHeader)(unsafe.Pointer(&to.Dst))
@@ -320,8 +304,7 @@ func convertInMessage(
 		type input fusekernel.ReleaseIn
 		in := (*input)(inMsg.Consume(unsafe.Sizeof(input{})))
 		if in == nil {
-			err = errors.New("Corrupt OpRelease")
-			return
+			return nil, errors.New("Corrupt OpRelease")
 		}
 
 		o = &fuseops.ReleaseFileHandleOp{
@@ -332,8 +315,7 @@ func convertInMessage(
 		type input fusekernel.ReleaseIn
 		in := (*input)(inMsg.Consume(unsafe.Sizeof(input{})))
 		if in == nil {
-			err = errors.New("Corrupt OpReleasedir")
-			return
+			return nil, errors.New("Corrupt OpReleasedir")
 		}
 
 		o = &fuseops.ReleaseDirHandleOp{
@@ -343,14 +325,12 @@ func convertInMessage(
 	case fusekernel.OpWrite:
 		in := (*fusekernel.WriteIn)(inMsg.Consume(fusekernel.WriteInSize(protocol)))
 		if in == nil {
-			err = errors.New("Corrupt OpWrite")
-			return
+			return nil, errors.New("Corrupt OpWrite")
 		}
 
 		buf := inMsg.ConsumeBytes(inMsg.Len())
 		if len(buf) < int(in.Size) {
-			err = errors.New("Corrupt OpWrite")
-			return
+			return nil, errors.New("Corrupt OpWrite")
 		}
 
 		o = &fuseops.WriteFileOp{
@@ -364,8 +344,7 @@ func convertInMessage(
 		type input fusekernel.FsyncIn
 		in := (*input)(inMsg.Consume(unsafe.Sizeof(input{})))
 		if in == nil {
-			err = errors.New("Corrupt OpFsync")
-			return
+			return nil, errors.New("Corrupt OpFsync")
 		}
 
 		o = &fuseops.SyncFileOp{
@@ -377,8 +356,7 @@ func convertInMessage(
 		type input fusekernel.FlushIn
 		in := (*input)(inMsg.Consume(unsafe.Sizeof(input{})))
 		if in == nil {
-			err = errors.New("Corrupt OpFlush")
-			return
+			return nil, errors.New("Corrupt OpFlush")
 		}
 
 		o = &fuseops.FlushFileOp{
@@ -398,8 +376,7 @@ func convertInMessage(
 		type input fusekernel.InterruptIn
 		in := (*input)(inMsg.Consume(unsafe.Sizeof(input{})))
 		if in == nil {
-			err = errors.New("Corrupt OpInterrupt")
-			return
+			return nil, errors.New("Corrupt OpInterrupt")
 		}
 
 		o = &interruptOp{
@@ -410,8 +387,7 @@ func convertInMessage(
 		type input fusekernel.InitIn
 		in := (*input)(inMsg.Consume(unsafe.Sizeof(input{})))
 		if in == nil {
-			err = errors.New("Corrupt OpInit")
-			return
+			return nil, errors.New("Corrupt OpInit")
 		}
 
 		o = &initOp{
@@ -424,20 +400,17 @@ func convertInMessage(
 		type input fusekernel.LinkIn
 		in := (*input)(inMsg.Consume(unsafe.Sizeof(input{})))
 		if in == nil {
-			err = errors.New("Corrupt OpLink")
-			return
+			return nil, errors.New("Corrupt OpLink")
 		}
 
 		name := inMsg.ConsumeBytes(inMsg.Len())
 		i := bytes.IndexByte(name, '\x00')
 		if i < 0 {
-			err = errors.New("Corrupt OpLink")
-			return
+			return nil, errors.New("Corrupt OpLink")
 		}
 		name = name[:i]
 		if len(name) == 0 {
-			err = errors.New("Corrupt OpLink (Name not read)")
-			return
+			return nil, errors.New("Corrupt OpLink (Name not read)")
 		}
 
 		o = &fuseops.CreateLinkOp{
@@ -450,8 +423,7 @@ func convertInMessage(
 		buf := inMsg.ConsumeBytes(inMsg.Len())
 		n := len(buf)
 		if n == 0 || buf[n-1] != '\x00' {
-			err = errors.New("Corrupt OpRemovexattr")
-			return
+			return nil, errors.New("Corrupt OpRemovexattr")
 		}
 
 		o = &fuseops.RemoveXattrOp{
@@ -463,15 +435,13 @@ func convertInMessage(
 		type input fusekernel.GetxattrIn
 		in := (*input)(inMsg.Consume(unsafe.Sizeof(input{})))
 		if in == nil {
-			err = errors.New("Corrupt OpGetxattr")
-			return
+			return nil, errors.New("Corrupt OpGetxattr")
 		}
 
 		name := inMsg.ConsumeBytes(inMsg.Len())
 		i := bytes.IndexByte(name, '\x00')
 		if i < 0 {
-			err = errors.New("Corrupt OpGetxattr")
-			return
+			return nil, errors.New("Corrupt OpGetxattr")
 		}
 		name = name[:i]
 
@@ -484,8 +454,7 @@ func convertInMessage(
 		readSize := int(in.Size)
 		p := outMsg.GrowNoZero(readSize)
 		if p == nil {
-			err = fmt.Errorf("Can't grow for %d-byte read", readSize)
-			return
+			return nil, fmt.Errorf("Can't grow for %d-byte read", readSize)
 		}
 
 		sh := (*reflect.SliceHeader)(unsafe.Pointer(&to.Dst))
@@ -497,8 +466,7 @@ func convertInMessage(
 		type input fusekernel.ListxattrIn
 		in := (*input)(inMsg.Consume(unsafe.Sizeof(input{})))
 		if in == nil {
-			err = errors.New("Corrupt OpListxattr")
-			return
+			return nil, errors.New("Corrupt OpListxattr")
 		}
 
 		to := &fuseops.ListXattrOp{
@@ -510,8 +478,7 @@ func convertInMessage(
 		if readSize != 0 {
 			p := outMsg.GrowNoZero(readSize)
 			if p == nil {
-				err = fmt.Errorf("Can't grow for %d-byte read", readSize)
-				return
+				return nil, fmt.Errorf("Can't grow for %d-byte read", readSize)
 			}
 			sh := (*reflect.SliceHeader)(unsafe.Pointer(&to.Dst))
 			sh.Data = uintptr(p)
@@ -522,20 +489,17 @@ func convertInMessage(
 		type input fusekernel.SetxattrIn
 		in := (*input)(inMsg.Consume(unsafe.Sizeof(input{})))
 		if in == nil {
-			err = errors.New("Corrupt OpSetxattr")
-			return
+			return nil, errors.New("Corrupt OpSetxattr")
 		}
 
 		payload := inMsg.ConsumeBytes(inMsg.Len())
 		// payload should be "name\x00value"
 		if len(payload) < 3 {
-			err = errors.New("Corrupt OpSetxattr")
-			return
+			return nil, errors.New("Corrupt OpSetxattr")
 		}
 		i := bytes.IndexByte(payload, '\x00')
 		if i < 0 {
-			err = errors.New("Corrupt OpSetxattr")
-			return
+			return nil, errors.New("Corrupt OpSetxattr")
 		}
 
 		name, value := payload[:i], payload[i+1:len(payload)]
@@ -546,6 +510,20 @@ func convertInMessage(
 			Value: value,
 			Flags: in.Flags,
 		}
+	case fusekernel.OpFallocate:
+		type input fusekernel.FallocateIn
+		in := (*input)(inMsg.Consume(unsafe.Sizeof(input{})))
+		if in == nil {
+			return nil, errors.New("Corrupt OpFallocate")
+		}
+
+		o = &fuseops.FallocateOp{
+			Inode:  fuseops.InodeID(inMsg.Header().Nodeid),
+			Handle: fuseops.HandleID(in.Fh),
+			Offset: in.Offset,
+			Length: in.Length,
+			Mode:   in.Mode,
+		}
 
 	default:
 		o = &unknownOp{
@@ -554,7 +532,7 @@ func convertInMessage(
 		}
 	}
 
-	return
+	return o, nil
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -575,29 +553,16 @@ func (c *Connection) kernelResponse(
 	// interruptOp .
 	switch op.(type) {
 	case *fuseops.ForgetInodeOp:
-		noResponse = true
-		return
+		return true
 
 	case *interruptOp:
-		noResponse = true
-		return
+		return true
 	}
 
 	// If the user returned the error, fill in the error field of the outgoing
 	// message header.
 	if opErr != nil {
 		handled := false
-
-		if opErr == syscall.ERANGE {
-			switch o := op.(type) {
-			case *fuseops.GetXattrOp:
-				writeXattrSize(m, uint32(o.BytesRead))
-				handled = true
-			case *fuseops.ListXattrOp:
-				writeXattrSize(m, uint32(o.BytesRead))
-				handled = true
-			}
-		}
 
 		if !handled {
 			m.OutHeader().Error = -int32(syscall.EIO)
@@ -620,7 +585,7 @@ func (c *Connection) kernelResponse(
 	}
 
 	h.Len = uint32(m.Len())
-	return
+	return false
 }
 
 // Like kernelResponse, but assumes the user replied with a nil error to the
@@ -777,20 +742,23 @@ func (c *Connection) kernelResponseForOp(
 		// convertInMessage already set up the destination buffer to be at the end
 		// of the out message. We need only shrink to the right size based on how
 		// much the user read.
-		if o.BytesRead == 0 {
+		if len(o.Dst) == 0 {
 			writeXattrSize(m, uint32(o.BytesRead))
 		} else {
 			m.ShrinkTo(buffer.OutMessageHeaderSize + o.BytesRead)
 		}
 
 	case *fuseops.ListXattrOp:
-		if o.BytesRead == 0 {
+		if len(o.Dst) == 0 {
 			writeXattrSize(m, uint32(o.BytesRead))
 		} else {
 			m.ShrinkTo(buffer.OutMessageHeaderSize + o.BytesRead)
 		}
 
 	case *fuseops.SetXattrOp:
+		// Empty response
+
+	case *fuseops.FallocateOp:
 		// Empty response
 
 	case *initOp:
@@ -817,7 +785,7 @@ func convertTime(t time.Time) (secs uint64, nsec uint32) {
 	totalNano := t.UnixNano()
 	secs = uint64(totalNano / 1e9)
 	nsec = uint32(totalNano % 1e9)
-	return
+	return secs, nsec
 }
 
 func convertAttributes(
@@ -856,6 +824,9 @@ func convertAttributes(
 	case in.Mode&os.ModeSocket != 0:
 		out.Mode |= syscall.S_IFSOCK
 	}
+	if in.Mode&os.ModeSetuid != 0 {
+		out.Mode |= syscall.S_ISUID
+	}
 }
 
 // Convert an absolute cache expiration time to a relative time from now for
@@ -871,7 +842,7 @@ func convertExpirationTime(t time.Time) (secs uint64, nsecs uint32) {
 		nsecs = uint32((d % time.Second) / time.Nanosecond)
 	}
 
-	return
+	return secs, nsecs
 }
 
 func convertChildInodeEntry(
