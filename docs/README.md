@@ -6,6 +6,8 @@ the user runs all of the code on their own machine and uploads directly to their
 configured cloud storage provider. Only this machine may interact with the
 archive.
 
+![Single-Device Mode](./single-device.png)
+
 First, create an account with a cloud object storage provider. Create a
 configuration, which we'll call `utahfs.yaml`, with the following contents:
 
@@ -84,6 +86,8 @@ Raspberry Pi or Intel NUC on their LAN are good candidates. The users' devices
 interact only with the server, and the server handles uploads / downloads with
 the cloud storage provider. This allows many users to work on the same archive
 at once and can improve user-perceived performance.
+
+![Multi-Device Mode](./multi-device.png)
 
 First, create an account with a cloud object storage provider. There are
 instructions on how to do this in the other files in this directory. Create a
