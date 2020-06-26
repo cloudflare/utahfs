@@ -37,6 +37,8 @@ available at:
 
 - [Backblaze B2](setup-backblaze-b2.md)
 - [Google Cloud Storage](setup-gcs.md)
+- [Local disk](setup-local-disk.md)
+- [MinIO](setup-minio.md)
 - [Scaleway](setup-scaleway.md)
 - [Wasabi](setup-wasabi.md)
 
