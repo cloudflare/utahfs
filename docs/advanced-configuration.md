@@ -5,7 +5,8 @@ This document describes the full range of configuration options for UtahFS.
 
 ### Storage Provider Configuration
 
-`StorageProvider` is a sub-section of both client and server-side config files.
+`StorageProvider` is a sub-section of both client-side and server-side config
+files.
 
 ```go
 type StorageProvider struct {
@@ -80,7 +81,8 @@ improve the performance of applications like video streaming, where we benefit
 from needing fewer requests to buffer data. The trade-off is that things like
 inodes and small files will be padded to this larger block size, wasting space
 and bandwidth when they need to be accessed. Note that there is one inode per
-file or folder.
+file or folder. It's not recommended to change this setting drastically from the
+default.
 
 
 ### Server Config
