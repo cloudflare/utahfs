@@ -213,7 +213,8 @@ usually has four files:
 4. `wal` - This contains a WAL, or Write-Ahead Log, where changes to the files
    in the archive are buffered before being pushed to the storage provider in
    the background. It has a maximum size (based on the `max-wal-size` config
-   setting), after which new changes will block on
+   setting), after which new changes will block on the storage provider
+   accepting previous writes.
 
 Out of all of these, the most important one is #4 (the WAL) because it stores
 data that hasn't been uploaded yet. You can see the number of blocks in the WAL
