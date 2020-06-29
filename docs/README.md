@@ -37,6 +37,7 @@ and fill in the items under `storage-provider` with the credentials you got from
 your storage provider. Setup instructions for several storage providers are
 available at:
 
+<!-- This list is copied below, please update both places. -->
 - [Backblaze B2](setup-backblaze-b2.md)
 - [Google Cloud Storage](setup-gcs.md)
 - [Local disk](setup-local-disk.md)
@@ -90,10 +91,19 @@ at once and can improve user-perceived performance.
 
 ![Multi-Device Mode](./multi-device.png)
 
-First, create an account with a cloud object storage provider. There are
-instructions on how to do this in the other files in this directory. Create a
-file for the **server** configuration on the server, which we'll call
-`utahfs-server.yaml`, with the following contents:
+First, create an account with a cloud object storage provider. Setup
+instructions for several storage providers are available at:
+
+<!-- This list is copied below, please update both places. -->
+- [Backblaze B2](setup-backblaze-b2.md)
+- [Google Cloud Storage](setup-gcs.md)
+- [Local disk](setup-local-disk.md)
+- [MinIO](setup-minio.md)
+- [Scaleway](setup-scaleway.md)
+- [Wasabi](setup-wasabi.md)
+
+Then create a file for the **server** configuration on the server, which we'll
+call `utahfs-server.yaml`, with the following contents:
 
 ```yaml
 storage-provider:
@@ -181,7 +191,7 @@ data](#important-note-on-locally-stored-data).
 Appendix
 --------
 
-## Important Note on Locally Stored Data
+### Important Note on Locally Stored Data
 
 UtahFS maintains some locally stored data, either on the user's computer in
 Single-Device mode or on the server in Multi-Device mode. Many users have been
