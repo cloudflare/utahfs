@@ -23,20 +23,24 @@ func maxSize(numPtrs, dataSize int64) int64 {
 }
 
 type StorageProvider struct {
+	// Backblaze B2
 	B2AcctId string `yaml:"b2-acct-id"`
 	B2AppKey string `yaml:"b2-app-key"`
 	B2Bucket string `yaml:"b2-bucket"`
 	B2Url    string `yaml:"b2-url"`
 
+	// AWS S3 and compatible APIs
 	S3AppId  string `yaml:"s3-app-id"`
 	S3AppKey string `yaml:"s3-app-key"`
 	S3Bucket string `yaml:"s3-bucket"`
 	S3Url    string `yaml:"s3-url"`
 	S3Region string `yaml:"s3-region"`
 
+	// Google Cloud Storage
 	GCSBucketName      string `yaml:"gcs-bucket-name"`
 	GCSCredentialsPath string `yaml:"gcs-credentials-path"`
 
+	// Local disk storage
 	DiskPath string `yaml:"disk-path"`
 
 	Retry int `yaml:"retry"` // Max number of times to retry reqs that fail.

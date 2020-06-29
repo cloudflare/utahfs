@@ -223,3 +223,6 @@ mode, or `http://localhost:3003/metrics` on the server in Multi-Device mode) and
 checking the value of the `local_wal_size` metric. **This metric must be zero**,
 indicating that all changes have been uploaded, before you can safely delete the
 local data folder.
+
+See the [Advanced Configuration](./advanced-configuration.md) document for more
+information about the config settings mentioned above and other fine-tuning.
