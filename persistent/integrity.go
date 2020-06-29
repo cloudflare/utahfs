@@ -179,6 +179,8 @@ type integrity struct {
 // The root of the Merkle tree is authenticated by `password`, and a copy of the
 // root and other metadata is kept in `pinFile`.
 func WithIntegrity(base BlockStorage, password, pinFile string) (BlockStorage, error) {
+	// NOTE: The fixed salt to Argon2 is intentional. Its purpose is domain
+	// separation, not to frustrate a password cracker.
 	key := argon2.IDKey([]byte(password), []byte("534ffca65b68a9b3"), 1, 64*1024, 4, 32)
 	mac := hmac.New(sha256.New, key)
 

@@ -30,6 +30,9 @@ import (
 func generateConfig(transportKey, hostname string) (*tls.Config, error) {
 	curve := elliptic.P256()
 
+	// NOTE: The fixed salt to Argon2 is intentional. Its purpose is domain
+	// separation, not to frustrate a password cracker.
+
 	// Generate root CA certificate.
 	key := argon2.IDKey([]byte(transportKey), []byte("da61d4a0469fdb7f"), 1, 64*1024, 4, 32)
 	caD := new(big.Int).SetBytes(key)

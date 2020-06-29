@@ -24,6 +24,8 @@ type encryption struct {
 //
 // The encryption key is derived with Argon2 from `password`.
 func WithEncryption(base BlockStorage, password string) BlockStorage {
+	// NOTE: The fixed salt to Argon2 is intentional. Its purpose is domain
+	// separation, not to frustrate a password cracker.
 	key := argon2.IDKey([]byte(password), []byte("7fedd6d671beec56"), 1, 64*1024, 4, 32)
 
 	return &encryption{base, key}
