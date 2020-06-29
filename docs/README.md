@@ -74,7 +74,8 @@ where `./utahfs.yaml` is the path to the configuration file, and `./utahfs` is
 the path to the directory to mount. The directory to mount must already exist
 and be empty.
 
-You're done!
+You're done! Please be sure to read the note on [locally stored
+data](#important-note-on-locally-stored-data).
 
 
 Multi-Device Setup
@@ -173,4 +174,41 @@ where `./utahfs.yaml` is the path to the configuration file, and `./utahfs` is
 the path to the directory to mount. Again, the directory to mount must already
 exist and be empty.
 
-You're done!
+You're done! Please be sure to read the note on [locally stored
+data](#important-note-on-locally-stored-data).
+
+
+Appendix
+--------
+
+## Important Note on Locally Stored Data
+
+UtahFS maintains some locally stored data, either on the user's computer in
+Single-Device mode or on the server in Multi-Device mode. Many users have been
+confused over the purpose of this data, so this section briefly describes how
+it's used.
+
+The default location for local data in Single-Device mode is a hidden `.utahfs`
+directory, or a `utahfs-data` directory in Multi-Device mode. This directory
+usually has four files:
+
+1. `cache` - Commonly accessed data blocks are cached here for faster access.
+   After it reaches a configured maximum size (based on the `disk-cache-size`
+   config setting), it evicts blocks on an LRU basis.
+2. `metadata` - All metadata blocks (like inodes, or global state) are cached
+   here for faster access. This is enabled by the `keep-metadata` config
+   setting, and does not have a maximum size.
+3. `pin.json` - This keeps a small amount of cryptographic information that can
+   help detect if the storage provider has tampered with our archive.
+4. `wal` - This contains a WAL, or Write-Ahead Log, where changes to the files
+   in the archive are buffered before being pushed to the storage provider in
+   the background. It has a maximum size (based on the `max-wal-size` config
+   setting), after which new changes will block on
+
+Out of all of these, the most important one is #4 (the WAL) because it stores
+data that hasn't been uploaded yet. You can see the number of blocks in the WAL
+by going to the metrics server (`http://localhost:3001/metrics` in Single-Device
+mode, or `http://localhost:3003/metrics` on the server in Multi-Device mode) and
+checking the value of the `local_wal_size` metric. **This metric must be zero**,
+indicating that all changes have been uploaded, before you can safely delete the
+local data folder.
