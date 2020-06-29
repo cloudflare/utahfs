@@ -27,16 +27,17 @@ type StorageProvider struct {
 	GCSBucketName      string `yaml:"gcs-bucket-name"`
 	GCSCredentialsPath string `yaml:"gcs-credentials-path"`
 
-	// Local disk storage.
+	// Local disk storage
 	DiskPath string `yaml:"disk-path"`
 
-	Retry int `yaml:"retry"` // Max number of times to retry reqs that fail.
+	Retry  int    `yaml:"retry"`  // Max number of times to retry reqs that fail.
+	Prefix string `yaml:"prefix"` // Prefix to put on every key, like `folder-name/`.
 }
 ```
 
 Only one section of the `StorageProvider` object may be set, corresponding to
 one storage provider, along with an optional `retry` count to reduce sporadic
-failures.
+failures or a key prefix.
 
 
 ### Client Config

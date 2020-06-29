@@ -43,7 +43,8 @@ type StorageProvider struct {
 	// Local disk storage
 	DiskPath string `yaml:"disk-path"`
 
-	Retry int `yaml:"retry"` // Max number of times to retry reqs that fail.
+	Retry  int    `yaml:"retry"`  // Max number of times to retry reqs that fail.
+	Prefix string `yaml:"prefix"` // Prefix to put on every key, like `folder-name/`.
 }
 
 func (sp *StorageProvider) hasB2() bool {
@@ -108,6 +109,10 @@ func (sp *StorageProvider) Store() (persistent.ObjectStorage, error) {
 		if err != nil {
 			return nil, err
 		}
+	}
+	// Configure a key prefix if the user wants.
+	if sp.Prefix != "" {
+		out = persistent.NewPrefix(out, sp.Prefix)
 	}
 
 	return out, nil

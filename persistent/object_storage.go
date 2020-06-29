@@ -75,3 +75,26 @@ func (r *retry) Delete(ctx context.Context, key string) (err error) {
 
 	return
 }
+
+type prefix struct {
+	base   ObjectStorage
+	prefix string
+}
+
+// NewPrefix wraps a base object storage backend, and ensures a user-provided
+// prefix is added to all keys.
+func NewPrefix(base ObjectStorage, p string) ObjectStorage {
+	return &prefix{base, p}
+}
+
+func (p *prefix) Get(ctx context.Context, key string) ([]byte, error) {
+	return p.base.Get(ctx, p.prefix+key)
+}
+
+func (p *prefix) Set(ctx context.Context, key string, data []byte, dt DataType) error {
+	return p.base.Set(ctx, p.prefix+key, data, dt)
+}
+
+func (p *prefix) Delete(ctx context.Context, key string) error {
+	return p.base.Delete(ctx, p.prefix+key)
+}
