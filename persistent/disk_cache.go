@@ -155,14 +155,15 @@ func NewDiskCache(base ObjectStorage, loc string, size int, exclude []DataType) 
 }
 
 func (dc *diskCache) addToCache(ctx context.Context, key string, data []byte) {
+	dc.mu.Lock()
+	defer dc.mu.Unlock()
+
 	// Add this key to the cache.
 	_, err := dc.db.ExecContext(ctx, "INSERT OR REPLACE INTO cache (key, val) VALUES (?, ?)", key, data)
 	if err != nil {
 		log.Println(err)
 		return
 	}
-	dc.mu.Lock()
-	defer dc.mu.Unlock()
 
 	dc.keys.bump(key)
 
@@ -179,8 +180,9 @@ func (dc *diskCache) addToCache(ctx context.Context, key string, data []byte) {
 
 func (dc *diskCache) removeFromCache(ctx context.Context, key string) {
 	dc.mu.Lock()
+	defer dc.mu.Unlock()
+
 	dc.keys.remove(key)
-	dc.mu.Unlock()
 	if _, err := dc.db.ExecContext(ctx, "DELETE FROM cache WHERE key = ?", key); err != nil {
 		log.Println(err)
 	}
@@ -192,7 +194,9 @@ func (dc *diskCache) Get(ctx context.Context, key string) ([]byte, error) {
 	defer dc.mapMu.Unlock(key)
 
 	var data []byte
+	dc.mu.Lock()
 	err := dc.db.QueryRowContext(ctx, "SELECT val FROM cache WHERE key = ?", key).Scan(&data)
+	dc.mu.Unlock()
 	if err == sql.ErrNoRows {
 		data, err = dc.base.Get(ctx, key)
 		if err != nil {
