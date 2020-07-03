@@ -1,14 +1,13 @@
 package persistent
 
 import (
-	"container/heap"
 	"context"
 	"database/sql"
 	"log"
+	"math/rand"
 	"os"
 	"path"
 	"sync"
-	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 
@@ -23,88 +22,22 @@ var DiskCacheSize = prometheus.NewGaugeVec(
 	[]string{"path"},
 )
 
-type keysHeap struct {
-	keys     []string
-	lastUsed []int64
-
-	keyToPos map[string]int
-}
-
-func newKeysHeap(size int) *keysHeap {
-	return &keysHeap{
-		keys:     make([]string, 0, size+1),
-		lastUsed: make([]int64, 0, size+1),
-
-		keyToPos: make(map[string]int, size+1),
-	}
-}
-
-func (kh *keysHeap) Len() int { return len(kh.keys) }
-
-func (kh *keysHeap) Less(i, j int) bool {
-	return kh.lastUsed[i] < kh.lastUsed[j]
-}
-
-func (kh *keysHeap) Swap(i, j int) {
-	key1, key2 := kh.keys[i], kh.keys[j]
-
-	kh.keys[i], kh.keys[j] = kh.keys[j], kh.keys[i]
-	kh.lastUsed[i], kh.lastUsed[j] = kh.lastUsed[j], kh.lastUsed[i]
-	kh.keyToPos[key1], kh.keyToPos[key2] = j, i
-}
-
-func (kh *keysHeap) Push(x interface{}) {
-	key := x.(string)
-
-	kh.keys = append(kh.keys, key)
-	kh.lastUsed = append(kh.lastUsed, time.Now().UnixNano())
-	kh.keyToPos[key] = len(kh.keys) - 1
-}
-
-func (kh *keysHeap) Pop() interface{} {
-	key := kh.keys[len(kh.keys)-1]
-
-	kh.keys = kh.keys[:len(kh.keys)-1]
-	kh.lastUsed = kh.lastUsed[:len(kh.lastUsed)-1]
-	delete(kh.keyToPos, key)
-
-	return key
-}
-
-func (kh *keysHeap) bump(key string) {
-	pos, ok := kh.keyToPos[key]
-	if !ok {
-		heap.Push(kh, key)
-		return
-	}
-	kh.lastUsed[pos] = time.Now().UnixNano()
-	heap.Fix(kh, pos)
-}
-
-func (kh *keysHeap) remove(key string) {
-	pos, ok := kh.keyToPos[key]
-	if !ok {
-		return
-	}
-	heap.Remove(kh, pos)
-}
-
 type diskCache struct {
 	mu    sync.Mutex
 	mapMu MapMutex
 
 	base    ObjectStorage
 	loc     string
-	size    int
+	size    int64
 	exclude []DataType
 
-	keys *keysHeap
-	db   *sql.DB
+	n  int64
+	db *sql.DB
 }
 
-// NewDiskCache wraps a base object storage backend with a large on-disk LRU
-// cache stored at `loc`.
-func NewDiskCache(base ObjectStorage, loc string, size int, exclude []DataType) (ObjectStorage, error) {
+// NewDiskCache wraps a base object storage backend with a large on-disk cache
+// stored at `loc`.
+func NewDiskCache(base ObjectStorage, loc string, size int64, exclude []DataType) (ObjectStorage, error) {
 	if err := os.MkdirAll(path.Dir(loc), 0744); err != nil {
 		return nil, err
 	}
@@ -117,30 +50,16 @@ func NewDiskCache(base ObjectStorage, loc string, size int, exclude []DataType) 
 		return nil, err
 	}
 
-	// List all keys in the cache and build a heap.
-	kh := newKeysHeap(size)
-
-	rows, err := db.Query("SELECT key FROM cache")
-	if err != nil {
+	// Get the max rowid in the cache.
+	var n int64
+	err = db.QueryRow("SELECT MAX(rowid) FROM cache").Scan(&n)
+	if err == sql.ErrNoRows {
+		n = 0
+	} else if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	for rows.Next() {
-		var key string
-		if err := rows.Scan(&key); err != nil {
-			return nil, err
-		}
-		kh.Push(key)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	rows.Close()
-
-	heap.Init(kh)
-
-	DiskCacheSize.WithLabelValues(loc).Set(float64(kh.Len()))
+	DiskCacheSize.WithLabelValues(loc).Set(float64(n))
 	return &diskCache{
 		mapMu: NewMapMutex(),
 
@@ -149,8 +68,8 @@ func NewDiskCache(base ObjectStorage, loc string, size int, exclude []DataType) 
 		size:    size,
 		exclude: exclude,
 
-		keys: kh,
-		db:   db,
+		n:  n,
+		db: db,
 	}, nil
 }
 
@@ -158,35 +77,86 @@ func (dc *diskCache) addToCache(ctx context.Context, key string, data []byte) {
 	dc.mu.Lock()
 	defer dc.mu.Unlock()
 
-	// Add this key to the cache.
-	_, err := dc.db.ExecContext(ctx, "INSERT OR REPLACE INTO cache (key, val) VALUES (?, ?)", key, data)
+	tx, err := dc.db.BeginTx(ctx, nil)
 	if err != nil {
 		log.Println(err)
 		return
 	}
+	defer tx.Rollback()
 
-	dc.keys.bump(key)
+	n := dc.n + 1
+	i := rand.Int63n(n) + 1
 
-	// Evict from the cache until we're back at/below the target size.
-	for dc.keys.Len() > dc.size {
-		key := heap.Pop(dc.keys).(string)
-		if _, err := dc.db.ExecContext(ctx, "DELETE FROM cache WHERE key = ?", key); err != nil {
+	// Move a random existing entry into the next rowid slot.
+	if i != dc.n {
+		_, err := tx.ExecContext(ctx, "UPDATE cache SET rowid = ? WHERE rowid = ?", n, i)
+		if err != nil {
 			log.Println(err)
 			return
 		}
 	}
-	DiskCacheSize.WithLabelValues(dc.loc).Set(float64(dc.keys.Len()))
+	// Add the new row to the cache.
+	_, err = tx.ExecContext(ctx, "INSERT OR REPLACE INTO cache (rowid, key, val) VALUES (?, ?, ?)", i, key, data)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	// Evict from the cache until we're back at/below the target size.
+	for n > dc.size {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM cache WHERE rowid = ?", n); err != nil {
+			log.Println(err)
+			return
+		}
+		n -= 1
+	}
+
+	// Commit the transaction.
+	if err := tx.Commit(); err != nil {
+		log.Println(err)
+		return
+	}
+	dc.n = n
+	DiskCacheSize.WithLabelValues(dc.loc).Set(float64(n))
 }
 
 func (dc *diskCache) removeFromCache(ctx context.Context, key string) {
 	dc.mu.Lock()
 	defer dc.mu.Unlock()
 
-	dc.keys.remove(key)
-	if _, err := dc.db.ExecContext(ctx, "DELETE FROM cache WHERE key = ?", key); err != nil {
+	tx, err := dc.db.BeginTx(ctx, nil)
+	if err != nil {
 		log.Println(err)
+		return
 	}
-	DiskCacheSize.WithLabelValues(dc.loc).Dec()
+	defer tx.Rollback()
+
+	// Get the rowid of the key we want to delete.
+	var rowid int64
+	err = tx.QueryRowContext(ctx, "SELECT rowid FROM cache WHERE key = ?", key).Scan(&rowid)
+	if err == sql.ErrNoRows {
+		return
+	} else if err != nil {
+		log.Println(err)
+		return
+	}
+	// Delete the row.
+	if _, err := tx.ExecContext(ctx, "DELETE FROM cache WHERE rowid = ?", rowid); err != nil {
+		log.Println(err)
+		return
+	}
+	// Move something into this rowid gap.
+	if _, err := tx.ExecContext(ctx, "UPDATE cache SET rowid = ? WHERE rowid = ?", rowid, dc.n); err != nil {
+		log.Println(err)
+		return
+	}
+
+	// Commit the transaction.
+	if err := tx.Commit(); err != nil {
+		log.Println(err)
+		return
+	}
+	dc.n -= 1
+	DiskCacheSize.WithLabelValues(dc.loc).Set(float64(dc.n))
 }
 
 func (dc *diskCache) Get(ctx context.Context, key string) ([]byte, error) {
@@ -207,9 +177,6 @@ func (dc *diskCache) Get(ctx context.Context, key string) ([]byte, error) {
 	} else if err != nil {
 		return nil, err
 	}
-	dc.mu.Lock()
-	dc.keys.bump(key)
-	dc.mu.Unlock()
 	return data, nil
 }
 
