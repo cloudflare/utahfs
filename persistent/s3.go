@@ -3,7 +3,7 @@ package persistent
 import (
 	"bytes"
 	"context"
-	"io/ioutil"
+	"io"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
@@ -45,6 +45,9 @@ func (s *s3Client) Get(ctx context.Context, key string) ([]byte, error) {
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
 	})
+	if res != nil && res.Body != nil {
+		defer res.Body.Close()
+	}
 	if aerr, ok := err.(awserr.Error); ok && aerr.Code() == s3.ErrCodeNoSuchKey {
 		S3Ops.WithLabelValues("get", "true").Inc()
 		return nil, ErrObjectNotFound
@@ -52,13 +55,18 @@ func (s *s3Client) Get(ctx context.Context, key string) ([]byte, error) {
 		S3Ops.WithLabelValues("get", "false").Inc()
 		return nil, err
 	}
-	data, err := ioutil.ReadAll(res.Body)
+
+	data := bytes.NewBuffer(nil)
+	if res.ContentLength != nil {
+		data = bytes.NewBuffer(make([]byte, 0, *res.ContentLength))
+	}
+	_, err = io.Copy(data, res.Body)
 	if err != nil {
 		S3Ops.WithLabelValues("get", "false").Inc()
 		return nil, err
 	}
 	S3Ops.WithLabelValues("get", "true").Inc()
-	return data, nil
+	return data.Bytes(), nil
 }
 
 func (s *s3Client) Set(ctx context.Context, key string, data []byte, _ DataType) error {

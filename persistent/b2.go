@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net"
 	"net/http"
 	"sync"
@@ -89,13 +89,14 @@ func (b *b2) Get(ctx context.Context, key string) ([]byte, error) {
 		return nil, fmt.Errorf("storage: unexpected response status: %v", resp.Status)
 	}
 
-	data, err := ioutil.ReadAll(resp.Body)
+	data := &bytes.Buffer{}
+	_, err = io.Copy(data, resp.Body)
 	if err != nil {
 		B2Ops.WithLabelValues("get", "false").Inc()
 		return nil, err
 	}
 	B2Ops.WithLabelValues("get", "true").Inc()
-	return data, nil
+	return data.Bytes(), nil
 }
 
 func (b *b2) Set(ctx context.Context, key string, data []byte, _ DataType) error {

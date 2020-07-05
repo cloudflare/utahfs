@@ -1,8 +1,9 @@
 package persistent
 
 import (
+	"bytes"
 	"context"
-	"io/ioutil"
+	"io"
 	"os"
 
 	"cloud.google.com/go/storage"
@@ -53,13 +54,14 @@ func (g *gcs) Get(ctx context.Context, key string) ([]byte, error) {
 	}
 	defer r.Close()
 
-	data, err := ioutil.ReadAll(r)
+	data := &bytes.Buffer{}
+	_, err = io.Copy(data, r)
 	if err != nil {
 		GCSOps.WithLabelValues("get", "false").Inc()
 		return nil, err
 	}
 	GCSOps.WithLabelValues("get", "true").Inc()
-	return data, nil
+	return data.Bytes(), nil
 }
 
 func (g *gcs) Set(ctx context.Context, key string, data []byte, _ DataType) error {
