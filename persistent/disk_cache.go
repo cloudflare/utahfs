@@ -51,15 +51,15 @@ func NewDiskCache(base ObjectStorage, loc string, size int64, exclude []DataType
 	}
 
 	// Get the max rowid in the cache.
-	var n int64
+	var n *int64
 	err = db.QueryRow("SELECT MAX(rowid) FROM cache").Scan(&n)
-	if err == sql.ErrNoRows {
-		n = 0
-	} else if err != nil {
+	if err != nil {
 		return nil, err
+	} else if n == nil {
+		n = new(int64)
 	}
 
-	DiskCacheSize.WithLabelValues(loc).Set(float64(n))
+	DiskCacheSize.WithLabelValues(loc).Set(float64(*n))
 	return &diskCache{
 		mapMu: NewMapMutex(),
 
@@ -68,7 +68,7 @@ func NewDiskCache(base ObjectStorage, loc string, size int64, exclude []DataType
 		size:    size,
 		exclude: exclude,
 
-		n:  n,
+		n:  *n,
 		db: db,
 	}, nil
 }
