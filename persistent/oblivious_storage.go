@@ -9,7 +9,7 @@ import (
 	"path"
 	"strings"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 type obliviousStore struct {
@@ -106,7 +106,7 @@ func NewLocalOblivious(loc string) (ObliviousStorage, error) {
 	if err := os.MkdirAll(path.Dir(loc), 0744); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite3", loc)
+	db, err := sql.Open("sqlite", loc)
 	if err != nil {
 		return nil, err
 	}

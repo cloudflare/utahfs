@@ -9,7 +9,7 @@ import (
 	"path"
 	"sync"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -41,7 +41,7 @@ func NewDiskCache(base ObjectStorage, loc string, size int64, exclude []DataType
 	if err := os.MkdirAll(path.Dir(loc), 0744); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite3", loc)
+	db, err := sql.Open("sqlite", loc)
 	if err != nil {
 		return nil, err
 	}
