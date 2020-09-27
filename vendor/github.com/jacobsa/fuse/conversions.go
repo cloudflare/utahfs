@@ -706,6 +706,7 @@ func (c *Connection) kernelResponseForOp(
 		out.St.Bavail = o.BlocksAvailable
 		out.St.Files = o.Inodes
 		out.St.Ffree = o.InodesFree
+		out.St.Namelen = 255
 
 		// The posix spec for sys/statvfs.h (http://goo.gl/LktgrF) defines the
 		// following fields of statvfs, among others:
