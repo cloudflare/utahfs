@@ -35,6 +35,8 @@ type StorageProvider struct {
 	S3Bucket string `yaml:"s3-bucket"`
 	S3Url    string `yaml:"s3-url"`
 	S3Region string `yaml:"s3-region"`
+	S3SigningRegion string `yaml:"s3-signing-region"` // Default to same as region
+	S3SigningVersion string `yaml:"s3-signing-version"` // Default "v4"
 
 	// Google Cloud Storage
 	GCSBucketName      string `yaml:"gcs-bucket-name"`
@@ -93,7 +95,13 @@ func (sp *StorageProvider) Store() (persistent.ObjectStorage, error) {
 	if sp.hasB2() {
 		out, err = persistent.NewB2(sp.B2AcctId, sp.B2AppKey, sp.B2Bucket, sp.B2Url)
 	} else if sp.hasS3() {
-		out, err = persistent.NewS3(sp.S3AppId, sp.S3AppKey, sp.S3Bucket, sp.S3Url, sp.S3Region)
+		if sp.S3SigningVersion == "" {
+			sp.S3SigningVersion = "v4"
+		}
+		if sp.S3SigningRegion == "" {
+			sp.S3SigningRegion = sp.S3Region
+		}
+		out, err = persistent.NewS3(sp.S3AppId, sp.S3AppKey, sp.S3Bucket, sp.S3Url, sp.S3Region, sp.S3SigningRegion, sp.S3SigningVersion)
 	} else if sp.hasGCS() {
 		out, err = persistent.NewGCS(sp.GCSBucketName, sp.GCSCredentialsPath)
 	} else if sp.hasDisk() {

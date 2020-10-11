@@ -8,6 +8,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/endpoints"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/prometheus/client_golang/prometheus"
@@ -29,10 +30,18 @@ type s3Client struct {
 // NewS3 returns object storage backed by AWS S3 or a compatible service like
 // Wasabi. `appId` and `appKey` are the static credentials. `bucket` is the name
 // of the bucket. `url` and `region` are the location of the S3 cluster.
-func NewS3(appId, appKey, bucket, url, region string) (ObjectStorage, error) {
+func NewS3(appId, appKey, bucket, url, region, signingRegion, signingVersion string) (ObjectStorage, error) {
+	myCustomResolver := func(s, r string, optFns ...func(*endpoints.Options)) (endpoints.ResolvedEndpoint, error) {
+		rep, err := endpoints.DefaultResolver().EndpointFor(s, r, optFns...)
+		rep.URL = url
+		rep.SigningRegion = signingRegion
+		rep.SigningMethod = signingVersion
+
+		return rep, err
+	}
 	client := s3.New(session.New(&aws.Config{
 		Credentials:      credentials.NewStaticCredentials(appId, appKey, ""),
-		Endpoint:         aws.String(url),
+		EndpointResolver: endpoints.ResolverFunc(myCustomResolver),
 		Region:           aws.String(region),
 		S3ForcePathStyle: aws.Bool(true),
 	}))
