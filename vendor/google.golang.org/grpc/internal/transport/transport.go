@@ -41,8 +41,6 @@ import (
 	"google.golang.org/grpc/tap"
 )
 
-const logLevel = 2
-
 type bufferPool struct {
 	pool sync.Pool
 }

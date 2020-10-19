@@ -53,10 +53,6 @@ func (r *ModuleResolver) init() error {
 		return nil
 	}
 
-	goenv, err := r.env.goEnv()
-	if err != nil {
-		return err
-	}
 	inv := gocommand.Invocation{
 		BuildFlags: r.env.BuildFlags,
 		Env:        r.env.env(),
@@ -86,7 +82,7 @@ func (r *ModuleResolver) init() error {
 	if gmc := r.env.Env["GOMODCACHE"]; gmc != "" {
 		r.moduleCacheDir = gmc
 	} else {
-		r.moduleCacheDir = filepath.Join(filepath.SplitList(goenv["GOPATH"])[0], "/pkg/mod")
+		r.moduleCacheDir = filepath.Join(filepath.SplitList(r.env.gopath())[0], "/pkg/mod")
 	}
 
 	sort.Slice(r.modsByModPath, func(i, j int) bool {
@@ -103,7 +99,7 @@ func (r *ModuleResolver) init() error {
 	})
 
 	r.roots = []gopathwalk.Root{
-		{filepath.Join(goenv["GOROOT"], "/src"), gopathwalk.RootGOROOT},
+		{filepath.Join(r.env.goroot(), "/src"), gopathwalk.RootGOROOT},
 	}
 	if r.main != nil {
 		r.roots = append(r.roots, gopathwalk.Root{r.main.Dir, gopathwalk.RootCurrentModule})
@@ -244,7 +240,7 @@ func (r *ModuleResolver) findPackage(importPath string) (*gocommand.ModuleJSON, 
 		// files in that directory. If not, it could be provided by an
 		// outer module. See #29736.
 		for _, fi := range pkgFiles {
-			if ok, _ := r.env.matchFile(pkgDir, fi.Name()); ok {
+			if ok, _ := r.env.buildContext().MatchFile(pkgDir, fi.Name()); ok {
 				return m, pkgDir
 			}
 		}

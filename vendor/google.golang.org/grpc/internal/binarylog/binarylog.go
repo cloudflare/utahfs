@@ -40,8 +40,6 @@ type Logger interface {
 // It is used to get a methodLogger for each individual method.
 var binLogger Logger
 
-var grpclogLogger = grpclog.Component("binarylog")
-
 // SetLogger sets the binarg logger.
 //
 // Only call this at init time.
@@ -151,7 +149,7 @@ func (l *logger) setBlacklist(method string) error {
 func (l *logger) getMethodLogger(methodName string) *MethodLogger {
 	s, m, err := grpcutil.ParseMethod(methodName)
 	if err != nil {
-		grpclogLogger.Infof("binarylogging: failed to parse %q: %v", methodName, err)
+		grpclog.Infof("binarylogging: failed to parse %q: %v", methodName, err)
 		return nil
 	}
 	if ml, ok := l.methods[s+"/"+m]; ok {

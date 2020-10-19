@@ -59,7 +59,6 @@ const (
 )
 
 var statusOK = status.New(codes.OK, "")
-var logger = grpclog.Component("core")
 
 type methodHandler func(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor UnaryServerInterceptor) (interface{}, error)
 
@@ -80,14 +79,13 @@ type ServiceDesc struct {
 	Metadata    interface{}
 }
 
-// serviceInfo wraps information about a service. It is very similar to
-// ServiceDesc and is constructed from it for internal purposes.
-type serviceInfo struct {
-	// Contains the implementation for the methods in this service.
-	serviceImpl interface{}
-	methods     map[string]*MethodDesc
-	streams     map[string]*StreamDesc
-	mdata       interface{}
+// service consists of the information of the server serving this service and
+// the methods in this service.
+type service struct {
+	server interface{} // the server for service methods
+	md     map[string]*MethodDesc
+	sd     map[string]*StreamDesc
+	mdata  interface{}
 }
 
 type serverWorkerData struct {
@@ -100,14 +98,14 @@ type serverWorkerData struct {
 type Server struct {
 	opts serverOptions
 
-	mu       sync.Mutex // guards following
-	lis      map[net.Listener]bool
-	conns    map[transport.ServerTransport]bool
-	serve    bool
-	drain    bool
-	cv       *sync.Cond              // signaled when connections close for GracefulStop
-	services map[string]*serviceInfo // service name -> service info
-	events   trace.EventLog
+	mu     sync.Mutex // guards following
+	lis    map[net.Listener]bool
+	conns  map[transport.ServerTransport]bool
+	serve  bool
+	drain  bool
+	cv     *sync.Cond          // signaled when connections close for GracefulStop
+	m      map[string]*service // service name -> service info
+	events trace.EventLog
 
 	quit               *grpcsync.Event
 	done               *grpcsync.Event
@@ -225,7 +223,7 @@ func InitialConnWindowSize(s int32) ServerOption {
 // KeepaliveParams returns a ServerOption that sets keepalive and max-age parameters for the server.
 func KeepaliveParams(kp keepalive.ServerParameters) ServerOption {
 	if kp.Time > 0 && kp.Time < time.Second {
-		logger.Warning("Adjusting keepalive ping interval to minimum period of 1s")
+		grpclog.Warning("Adjusting keepalive ping interval to minimum period of 1s")
 		kp.Time = time.Second
 	}
 
@@ -244,12 +242,6 @@ func KeepaliveEnforcementPolicy(kep keepalive.EnforcementPolicy) ServerOption {
 // CustomCodec returns a ServerOption that sets a codec for message marshaling and unmarshaling.
 //
 // This will override any lookups by content-subtype for Codecs registered with RegisterCodec.
-//
-// Deprecated: register codecs using encoding.RegisterCodec. The server will
-// automatically use registered codecs based on the incoming requests' headers.
-// See also
-// https://github.com/grpc/grpc-go/blob/master/Documentation/encoding.md#using-a-codec.
-// Will be supported throughout 1.x.
 func CustomCodec(codec Codec) ServerOption {
 	return newFuncServerOption(func(o *serverOptions) {
 		o.codec = codec
@@ -262,8 +254,7 @@ func CustomCodec(codec Codec) ServerOption {
 // default, server messages will be sent using the same compressor with which
 // request messages were sent.
 //
-// Deprecated: use encoding.RegisterCompressor instead. Will be supported
-// throughout 1.x.
+// Deprecated: use encoding.RegisterCompressor instead.
 func RPCCompressor(cp Compressor) ServerOption {
 	return newFuncServerOption(func(o *serverOptions) {
 		o.cp = cp
@@ -274,8 +265,7 @@ func RPCCompressor(cp Compressor) ServerOption {
 // messages.  It has higher priority than decompressors registered via
 // encoding.RegisterCompressor.
 //
-// Deprecated: use encoding.RegisterCompressor instead. Will be supported
-// throughout 1.x.
+// Deprecated: use encoding.RegisterCompressor instead.
 func RPCDecompressor(dc Decompressor) ServerOption {
 	return newFuncServerOption(func(o *serverOptions) {
 		o.dc = dc
@@ -285,7 +275,7 @@ func RPCDecompressor(dc Decompressor) ServerOption {
 // MaxMsgSize returns a ServerOption to set the max message size in bytes the server can receive.
 // If this is not set, gRPC uses the default limit.
 //
-// Deprecated: use MaxRecvMsgSize instead. Will be supported throughout 1.x.
+// Deprecated: use MaxRecvMsgSize instead.
 func MaxMsgSize(m int) ServerOption {
 	return MaxRecvMsgSize(m)
 }
@@ -498,13 +488,13 @@ func NewServer(opt ...ServerOption) *Server {
 		o.apply(&opts)
 	}
 	s := &Server{
-		lis:      make(map[net.Listener]bool),
-		opts:     opts,
-		conns:    make(map[transport.ServerTransport]bool),
-		services: make(map[string]*serviceInfo),
-		quit:     grpcsync.NewEvent(),
-		done:     grpcsync.NewEvent(),
-		czData:   new(channelzData),
+		lis:    make(map[net.Listener]bool),
+		opts:   opts,
+		conns:  make(map[transport.ServerTransport]bool),
+		m:      make(map[string]*service),
+		quit:   grpcsync.NewEvent(),
+		done:   grpcsync.NewEvent(),
+		czData: new(channelzData),
 	}
 	chainUnaryServerInterceptors(s)
 	chainStreamServerInterceptors(s)
@@ -540,29 +530,14 @@ func (s *Server) errorf(format string, a ...interface{}) {
 	}
 }
 
-// ServiceRegistrar wraps a single method that supports service registration. It
-// enables users to pass concrete types other than grpc.Server to the service
-// registration methods exported by the IDL generated code.
-type ServiceRegistrar interface {
-	// RegisterService registers a service and its implementation to the
-	// concrete type implementing this interface.  It may not be called
-	// once the server has started serving.
-	// desc describes the service and its methods and handlers. impl is the
-	// service implementation which is passed to the method handlers.
-	RegisterService(desc *ServiceDesc, impl interface{})
-}
-
 // RegisterService registers a service and its implementation to the gRPC
 // server. It is called from the IDL generated code. This must be called before
-// invoking Serve. If ss is non-nil (for legacy code), its type is checked to
-// ensure it implements sd.HandlerType.
+// invoking Serve.
 func (s *Server) RegisterService(sd *ServiceDesc, ss interface{}) {
-	if ss != nil {
-		ht := reflect.TypeOf(sd.HandlerType).Elem()
-		st := reflect.TypeOf(ss)
-		if !st.Implements(ht) {
-			logger.Fatalf("grpc: Server.RegisterService found the handler of type %v that does not satisfy %v", st, ht)
-		}
+	ht := reflect.TypeOf(sd.HandlerType).Elem()
+	st := reflect.TypeOf(ss)
+	if !st.Implements(ht) {
+		grpclog.Fatalf("grpc: Server.RegisterService found the handler of type %v that does not satisfy %v", st, ht)
 	}
 	s.register(sd, ss)
 }
@@ -572,26 +547,26 @@ func (s *Server) register(sd *ServiceDesc, ss interface{}) {
 	defer s.mu.Unlock()
 	s.printf("RegisterService(%q)", sd.ServiceName)
 	if s.serve {
-		logger.Fatalf("grpc: Server.RegisterService after Server.Serve for %q", sd.ServiceName)
+		grpclog.Fatalf("grpc: Server.RegisterService after Server.Serve for %q", sd.ServiceName)
 	}
-	if _, ok := s.services[sd.ServiceName]; ok {
-		logger.Fatalf("grpc: Server.RegisterService found duplicate service registration for %q", sd.ServiceName)
+	if _, ok := s.m[sd.ServiceName]; ok {
+		grpclog.Fatalf("grpc: Server.RegisterService found duplicate service registration for %q", sd.ServiceName)
 	}
-	info := &serviceInfo{
-		serviceImpl: ss,
-		methods:     make(map[string]*MethodDesc),
-		streams:     make(map[string]*StreamDesc),
-		mdata:       sd.Metadata,
+	srv := &service{
+		server: ss,
+		md:     make(map[string]*MethodDesc),
+		sd:     make(map[string]*StreamDesc),
+		mdata:  sd.Metadata,
 	}
 	for i := range sd.Methods {
 		d := &sd.Methods[i]
-		info.methods[d.MethodName] = d
+		srv.md[d.MethodName] = d
 	}
 	for i := range sd.Streams {
 		d := &sd.Streams[i]
-		info.streams[d.StreamName] = d
+		srv.sd[d.StreamName] = d
 	}
-	s.services[sd.ServiceName] = info
+	s.m[sd.ServiceName] = srv
 }
 
 // MethodInfo contains the information of an RPC including its method name and type.
@@ -615,16 +590,16 @@ type ServiceInfo struct {
 // Service names include the package names, in the form of <package>.<service>.
 func (s *Server) GetServiceInfo() map[string]ServiceInfo {
 	ret := make(map[string]ServiceInfo)
-	for n, srv := range s.services {
-		methods := make([]MethodInfo, 0, len(srv.methods)+len(srv.streams))
-		for m := range srv.methods {
+	for n, srv := range s.m {
+		methods := make([]MethodInfo, 0, len(srv.md)+len(srv.sd))
+		for m := range srv.md {
 			methods = append(methods, MethodInfo{
 				Name:           m,
 				IsClientStream: false,
 				IsServerStream: false,
 			})
 		}
-		for m, d := range srv.streams {
+		for m, d := range srv.sd {
 			methods = append(methods, MethodInfo{
 				Name:           m,
 				IsClientStream: d.ClientStreams,
@@ -781,7 +756,7 @@ func (s *Server) handleRawConn(rawConn net.Conn) {
 			s.mu.Lock()
 			s.errorf("ServerHandshake(%q) failed: %v", rawConn.RemoteAddr(), err)
 			s.mu.Unlock()
-			channelz.Warningf(logger, s.channelzID, "grpc: Server.Serve failed to complete security handshake from %q: %v", rawConn.RemoteAddr(), err)
+			channelz.Warningf(s.channelzID, "grpc: Server.Serve failed to complete security handshake from %q: %v", rawConn.RemoteAddr(), err)
 			rawConn.Close()
 		}
 		rawConn.SetDeadline(time.Time{})
@@ -828,7 +803,7 @@ func (s *Server) newHTTP2Transport(c net.Conn, authInfo credentials.AuthInfo) tr
 		s.errorf("NewServerTransport(%q) failed: %v", c.RemoteAddr(), err)
 		s.mu.Unlock()
 		c.Close()
-		channelz.Warning(logger, s.channelzID, "grpc: Server.Serve failed to create ServerTransport: ", err)
+		channelz.Warning(s.channelzID, "grpc: Server.Serve failed to create ServerTransport: ", err)
 		return nil
 	}
 
@@ -982,12 +957,12 @@ func (s *Server) incrCallsFailed() {
 func (s *Server) sendResponse(t transport.ServerTransport, stream *transport.Stream, msg interface{}, cp Compressor, opts *transport.Options, comp encoding.Compressor) error {
 	data, err := encode(s.getCodec(stream.ContentSubtype()), msg)
 	if err != nil {
-		channelz.Error(logger, s.channelzID, "grpc: server failed to encode response: ", err)
+		channelz.Error(s.channelzID, "grpc: server failed to encode response: ", err)
 		return err
 	}
 	compData, err := compress(data, cp, comp)
 	if err != nil {
-		channelz.Error(logger, s.channelzID, "grpc: server failed to compress response: ", err)
+		channelz.Error(s.channelzID, "grpc: server failed to compress response: ", err)
 		return err
 	}
 	hdr, payload := msgHeader(data, compData)
@@ -1036,7 +1011,7 @@ func getChainUnaryHandler(interceptors []UnaryServerInterceptor, curr int, info 
 	}
 }
 
-func (s *Server) processUnaryRPC(t transport.ServerTransport, stream *transport.Stream, info *serviceInfo, md *MethodDesc, trInfo *traceInfo) (err error) {
+func (s *Server) processUnaryRPC(t transport.ServerTransport, stream *transport.Stream, srv *service, md *MethodDesc, trInfo *traceInfo) (err error) {
 	sh := s.opts.statsHandler
 	if sh != nil || trInfo != nil || channelz.IsOn() {
 		if channelz.IsOn() {
@@ -1159,8 +1134,10 @@ func (s *Server) processUnaryRPC(t transport.ServerTransport, stream *transport.
 	}
 	d, err := recvAndDecompress(&parser{r: stream}, stream, dc, s.opts.maxReceiveMessageSize, payInfo, decomp)
 	if err != nil {
-		if e := t.WriteStatus(stream, status.Convert(err)); e != nil {
-			channelz.Warningf(logger, s.channelzID, "grpc: Server.processUnaryRPC failed to write status %v", e)
+		if st, ok := status.FromError(err); ok {
+			if e := t.WriteStatus(stream, st); e != nil {
+				channelz.Warningf(s.channelzID, "grpc: Server.processUnaryRPC failed to write status %v", e)
+			}
 		}
 		return err
 	}
@@ -1191,7 +1168,7 @@ func (s *Server) processUnaryRPC(t transport.ServerTransport, stream *transport.
 		return nil
 	}
 	ctx := NewContextWithServerTransportStream(stream.Context(), stream)
-	reply, appErr := md.Handler(info.serviceImpl, ctx, df, s.opts.unaryInt)
+	reply, appErr := md.Handler(srv.server, ctx, df, s.opts.unaryInt)
 	if appErr != nil {
 		appStatus, ok := status.FromError(appErr)
 		if !ok {
@@ -1204,7 +1181,7 @@ func (s *Server) processUnaryRPC(t transport.ServerTransport, stream *transport.
 			trInfo.tr.SetError()
 		}
 		if e := t.WriteStatus(stream, appStatus); e != nil {
-			channelz.Warningf(logger, s.channelzID, "grpc: Server.processUnaryRPC failed to write status: %v", e)
+			channelz.Warningf(s.channelzID, "grpc: Server.processUnaryRPC failed to write status: %v", e)
 		}
 		if binlog != nil {
 			if h, _ := stream.Header(); h.Len() > 0 {
@@ -1233,7 +1210,7 @@ func (s *Server) processUnaryRPC(t transport.ServerTransport, stream *transport.
 		}
 		if sts, ok := status.FromError(err); ok {
 			if e := t.WriteStatus(stream, sts); e != nil {
-				channelz.Warningf(logger, s.channelzID, "grpc: Server.processUnaryRPC failed to write status: %v", e)
+				channelz.Warningf(s.channelzID, "grpc: Server.processUnaryRPC failed to write status: %v", e)
 			}
 		} else {
 			switch st := err.(type) {
@@ -1317,7 +1294,7 @@ func getChainStreamHandler(interceptors []StreamServerInterceptor, curr int, inf
 	}
 }
 
-func (s *Server) processStreamingRPC(t transport.ServerTransport, stream *transport.Stream, info *serviceInfo, sd *StreamDesc, trInfo *traceInfo) (err error) {
+func (s *Server) processStreamingRPC(t transport.ServerTransport, stream *transport.Stream, srv *service, sd *StreamDesc, trInfo *traceInfo) (err error) {
 	if channelz.IsOn() {
 		s.incrCallsStarted()
 	}
@@ -1434,8 +1411,8 @@ func (s *Server) processStreamingRPC(t transport.ServerTransport, stream *transp
 	}
 	var appErr error
 	var server interface{}
-	if info != nil {
-		server = info.serviceImpl
+	if srv != nil {
+		server = srv.server
 	}
 	if s.opts.streamInt == nil {
 		appErr = sd.Handler(server, ss)
@@ -1501,7 +1478,7 @@ func (s *Server) handleStream(t transport.ServerTransport, stream *transport.Str
 				trInfo.tr.LazyLog(&fmtStringer{"%v", []interface{}{err}}, true)
 				trInfo.tr.SetError()
 			}
-			channelz.Warningf(logger, s.channelzID, "grpc: Server.handleStream failed to write status: %v", err)
+			channelz.Warningf(s.channelzID, "grpc: Server.handleStream failed to write status: %v", err)
 		}
 		if trInfo != nil {
 			trInfo.tr.Finish()
@@ -1511,13 +1488,13 @@ func (s *Server) handleStream(t transport.ServerTransport, stream *transport.Str
 	service := sm[:pos]
 	method := sm[pos+1:]
 
-	srv, knownService := s.services[service]
+	srv, knownService := s.m[service]
 	if knownService {
-		if md, ok := srv.methods[method]; ok {
+		if md, ok := srv.md[method]; ok {
 			s.processUnaryRPC(t, stream, srv, md, trInfo)
 			return
 		}
-		if sd, ok := srv.streams[method]; ok {
+		if sd, ok := srv.sd[method]; ok {
 			s.processStreamingRPC(t, stream, srv, sd, trInfo)
 			return
 		}
@@ -1542,7 +1519,7 @@ func (s *Server) handleStream(t transport.ServerTransport, stream *transport.Str
 			trInfo.tr.LazyLog(&fmtStringer{"%v", []interface{}{err}}, true)
 			trInfo.tr.SetError()
 		}
-		channelz.Warningf(logger, s.channelzID, "grpc: Server.handleStream failed to write status: %v", err)
+		channelz.Warningf(s.channelzID, "grpc: Server.handleStream failed to write status: %v", err)
 	}
 	if trInfo != nil {
 		trInfo.tr.Finish()

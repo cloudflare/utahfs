@@ -19,10 +19,6 @@
 // Package grpclog (internal) defines depth logging for grpc.
 package grpclog
 
-import (
-	"os"
-)
-
 // Logger is the logger used for the non-depth log functions.
 var Logger LoggerV2
 
@@ -34,7 +30,7 @@ func InfoDepth(depth int, args ...interface{}) {
 	if DepthLogger != nil {
 		DepthLogger.InfoDepth(depth, args...)
 	} else {
-		Logger.Infoln(args...)
+		Logger.Info(args...)
 	}
 }
 
@@ -43,7 +39,7 @@ func WarningDepth(depth int, args ...interface{}) {
 	if DepthLogger != nil {
 		DepthLogger.WarningDepth(depth, args...)
 	} else {
-		Logger.Warningln(args...)
+		Logger.Warning(args...)
 	}
 }
 
@@ -52,7 +48,7 @@ func ErrorDepth(depth int, args ...interface{}) {
 	if DepthLogger != nil {
 		DepthLogger.ErrorDepth(depth, args...)
 	} else {
-		Logger.Errorln(args...)
+		Logger.Error(args...)
 	}
 }
 
@@ -61,9 +57,8 @@ func FatalDepth(depth int, args ...interface{}) {
 	if DepthLogger != nil {
 		DepthLogger.FatalDepth(depth, args...)
 	} else {
-		Logger.Fatalln(args...)
+		Logger.Fatal(args...)
 	}
-	os.Exit(1)
 }
 
 // LoggerV2 does underlying logging work for grpclog.

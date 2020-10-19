@@ -48,8 +48,6 @@ var ErrSharedConfigInvalidCredSource = awserr.New(ErrCodeSharedConfig, "credenti
 type Session struct {
 	Config   *aws.Config
 	Handlers request.Handlers
-
-	options Options
 }
 
 // New creates a new instance of the handlers merging in the provided configs
@@ -101,7 +99,7 @@ func New(cfgs ...*aws.Config) *Session {
 		return s
 	}
 
-	s := deprecatedNewSession(envCfg, cfgs...)
+	s := deprecatedNewSession(cfgs...)
 	if envErr != nil {
 		msg := "failed to load env config"
 		s.logDeprecatedNewSessionError(msg, envErr, cfgs)
@@ -245,23 +243,6 @@ type Options struct {
 	// function to initialize this value before changing the handlers to be
 	// used by the SDK.
 	Handlers request.Handlers
-
-	// Allows specifying a custom endpoint to be used by the EC2 IMDS client
-	// when making requests to the EC2 IMDS API. The must endpoint value must
-	// include protocol prefix.
-	//
-	// If unset, will the EC2 IMDS client will use its default endpoint.
-	//
-	// Can also be specified via the environment variable,
-	// AWS_EC2_METADATA_SERVICE_ENDPOINT.
-	//
-	//   AWS_EC2_METADATA_SERVICE_ENDPOINT=http://169.254.169.254
-	//
-	// If using an URL with an IPv6 address literal, the IPv6 address
-	// component must be enclosed in square brackets.
-	//
-	//   AWS_EC2_METADATA_SERVICE_ENDPOINT=http://[::1]
-	EC2IMDSEndpoint string
 }
 
 // NewSessionWithOptions returns a new Session created from SDK defaults, config files,
@@ -348,25 +329,7 @@ func Must(sess *Session, err error) *Session {
 	return sess
 }
 
-// Wraps the endpoint resolver with a resolver that will return a custom
-// endpoint for EC2 IMDS.
-func wrapEC2IMDSEndpoint(resolver endpoints.Resolver, endpoint string) endpoints.Resolver {
-	return endpoints.ResolverFunc(
-		func(service, region string, opts ...func(*endpoints.Options)) (
-			endpoints.ResolvedEndpoint, error,
-		) {
-			if service == ec2MetadataServiceID {
-				return endpoints.ResolvedEndpoint{
-					URL:           endpoint,
-					SigningName:   ec2MetadataServiceID,
-					SigningRegion: region,
-				}, nil
-			}
-			return resolver.EndpointFor(service, region)
-		})
-}
-
-func deprecatedNewSession(envCfg envConfig, cfgs ...*aws.Config) *Session {
+func deprecatedNewSession(cfgs ...*aws.Config) *Session {
 	cfg := defaults.Config()
 	handlers := defaults.Handlers()
 
@@ -378,11 +341,6 @@ func deprecatedNewSession(envCfg envConfig, cfgs ...*aws.Config) *Session {
 		// endpoints for service client configurations.
 		cfg.EndpointResolver = endpoints.DefaultResolver()
 	}
-
-	if len(envCfg.EC2IMDSEndpoint) != 0 {
-		cfg.EndpointResolver = wrapEC2IMDSEndpoint(cfg.EndpointResolver, envCfg.EC2IMDSEndpoint)
-	}
-
 	cfg.Credentials = defaults.CredChain(cfg, handlers)
 
 	// Reapply any passed in configs to override credentials if set
@@ -391,9 +349,6 @@ func deprecatedNewSession(envCfg envConfig, cfgs ...*aws.Config) *Session {
 	s := &Session{
 		Config:   cfg,
 		Handlers: handlers,
-		options: Options{
-			EC2IMDSEndpoint: envCfg.EC2IMDSEndpoint,
-		},
 	}
 
 	initHandlers(s)
@@ -463,7 +418,6 @@ func newSession(opts Options, envCfg envConfig, cfgs ...*aws.Config) (*Session, 
 	s := &Session{
 		Config:   cfg,
 		Handlers: handlers,
-		options:  opts,
 	}
 
 	initHandlers(s)
@@ -616,14 +570,6 @@ func mergeConfigSrcs(cfg, userCfg *aws.Config,
 		endpoints.LegacyS3UsEast1Endpoint,
 	})
 
-	ec2IMDSEndpoint := sessOpts.EC2IMDSEndpoint
-	if len(ec2IMDSEndpoint) == 0 {
-		ec2IMDSEndpoint = envCfg.EC2IMDSEndpoint
-	}
-	if len(ec2IMDSEndpoint) != 0 {
-		cfg.EndpointResolver = wrapEC2IMDSEndpoint(cfg.EndpointResolver, ec2IMDSEndpoint)
-	}
-
 	// Configure credentials if not already set by the user when creating the
 	// Session.
 	if cfg.Credentials == credentials.AnonymousCredentials && userCfg.Credentials == nil {
@@ -681,7 +627,6 @@ func (s *Session) Copy(cfgs ...*aws.Config) *Session {
 	newSession := &Session{
 		Config:   s.Config.Copy(cfgs...),
 		Handlers: s.Handlers.Copy(),
-		options:  s.options,
 	}
 
 	initHandlers(newSession)
@@ -719,8 +664,6 @@ func (s *Session) ClientConfig(service string, cfgs ...*aws.Config) client.Confi
 		SigningName:        resolved.SigningName,
 	}
 }
-
-const ec2MetadataServiceID = "ec2metadata"
 
 func (s *Session) resolveEndpoint(service, region string, cfg *aws.Config) (endpoints.ResolvedEndpoint, error) {
 

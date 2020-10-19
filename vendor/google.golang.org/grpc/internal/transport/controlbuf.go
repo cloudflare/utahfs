@@ -505,9 +505,7 @@ func (l *loopyWriter) run() (err error) {
 			// 1. When the connection is closed by some other known issue.
 			// 2. User closed the connection.
 			// 3. A graceful close of connection.
-			if logger.V(logLevel) {
-				logger.Infof("transport: loopyWriter.run returning. %v", err)
-			}
+			infof("transport: loopyWriter.run returning. %v", err)
 			err = nil
 		}
 	}()
@@ -607,9 +605,7 @@ func (l *loopyWriter) headerHandler(h *headerFrame) error {
 	if l.side == serverSide {
 		str, ok := l.estdStreams[h.streamID]
 		if !ok {
-			if logger.V(logLevel) {
-				logger.Warningf("transport: loopy doesn't recognize the stream: %d", h.streamID)
-			}
+			warningf("transport: loopy doesn't recognize the stream: %d", h.streamID)
 			return nil
 		}
 		// Case 1.A: Server is responding back with headers.
@@ -662,9 +658,7 @@ func (l *loopyWriter) writeHeader(streamID uint32, endStream bool, hf []hpack.He
 	l.hBuf.Reset()
 	for _, f := range hf {
 		if err := l.hEnc.WriteField(f); err != nil {
-			if logger.V(logLevel) {
-				logger.Warningf("transport: loopyWriter.writeHeader encountered error while encoding headers: %v", err)
-			}
+			warningf("transport: loopyWriter.writeHeader encountered error while encoding headers:", err)
 		}
 	}
 	var (

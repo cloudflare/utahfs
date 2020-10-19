@@ -20,7 +20,6 @@ package grpc
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -28,6 +27,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/grpclog"
 	"google.golang.org/grpc/internal"
 	internalserviceconfig "google.golang.org/grpc/internal/serviceconfig"
 	"google.golang.org/grpc/serviceconfig"
@@ -225,27 +225,19 @@ func parseDuration(s *string) (*time.Duration, error) {
 }
 
 type jsonName struct {
-	Service string
-	Method  string
+	Service *string
+	Method  *string
 }
 
-var (
-	errDuplicatedName             = errors.New("duplicated name")
-	errEmptyServiceNonEmptyMethod = errors.New("cannot combine empty 'service' and non-empty 'method'")
-)
-
-func (j jsonName) generatePath() (string, error) {
-	if j.Service == "" {
-		if j.Method != "" {
-			return "", errEmptyServiceNonEmptyMethod
-		}
-		return "", nil
+func (j jsonName) generatePath() (string, bool) {
+	if j.Service == nil {
+		return "", false
 	}
-	res := "/" + j.Service + "/"
-	if j.Method != "" {
-		res += j.Method
+	res := "/" + *j.Service + "/"
+	if j.Method != nil {
+		res += *j.Method
 	}
-	return res, nil
+	return res, true
 }
 
 // TODO(lyuxuan): delete this struct after cleaning up old service config implementation.
@@ -277,7 +269,7 @@ func parseServiceConfig(js string) *serviceconfig.ParseResult {
 	var rsc jsonSC
 	err := json.Unmarshal([]byte(js), &rsc)
 	if err != nil {
-		logger.Warningf("grpc: parseServiceConfig error unmarshaling %s due to %v", js, err)
+		grpclog.Warningf("grpc: parseServiceConfig error unmarshaling %s due to %v", js, err)
 		return &serviceconfig.ParseResult{Err: err}
 	}
 	sc := ServiceConfig{
@@ -297,15 +289,13 @@ func parseServiceConfig(js string) *serviceconfig.ParseResult {
 	if rsc.MethodConfig == nil {
 		return &serviceconfig.ParseResult{Config: &sc}
 	}
-
-	paths := map[string]struct{}{}
 	for _, m := range *rsc.MethodConfig {
 		if m.Name == nil {
 			continue
 		}
 		d, err := parseDuration(m.Timeout)
 		if err != nil {
-			logger.Warningf("grpc: parseServiceConfig error unmarshaling %s due to %v", js, err)
+			grpclog.Warningf("grpc: parseServiceConfig error unmarshaling %s due to %v", js, err)
 			return &serviceconfig.ParseResult{Err: err}
 		}
 
@@ -314,7 +304,7 @@ func parseServiceConfig(js string) *serviceconfig.ParseResult {
 			Timeout:      d,
 		}
 		if mc.retryPolicy, err = convertRetryPolicy(m.RetryPolicy); err != nil {
-			logger.Warningf("grpc: parseServiceConfig error unmarshaling %s due to %v", js, err)
+			grpclog.Warningf("grpc: parseServiceConfig error unmarshaling %s due to %v", js, err)
 			return &serviceconfig.ParseResult{Err: err}
 		}
 		if m.MaxRequestMessageBytes != nil {
@@ -331,20 +321,10 @@ func parseServiceConfig(js string) *serviceconfig.ParseResult {
 				mc.MaxRespSize = newInt(int(*m.MaxResponseMessageBytes))
 			}
 		}
-		for i, n := range *m.Name {
-			path, err := n.generatePath()
-			if err != nil {
-				logger.Warningf("grpc: parseServiceConfig error unmarshaling %s due to methodConfig[%d]: %v", js, i, err)
-				return &serviceconfig.ParseResult{Err: err}
+		for _, n := range *m.Name {
+			if path, valid := n.generatePath(); valid {
+				sc.Methods[path] = mc
 			}
-
-			if _, ok := paths[path]; ok {
-				err = errDuplicatedName
-				logger.Warningf("grpc: parseServiceConfig error unmarshaling %s due to methodConfig[%d]: %v", js, i, err)
-				return &serviceconfig.ParseResult{Err: err}
-			}
-			paths[path] = struct{}{}
-			sc.Methods[path] = mc
 		}
 	}
 
@@ -377,7 +357,7 @@ func convertRetryPolicy(jrp *jsonRetryPolicy) (p *retryPolicy, err error) {
 		*mb <= 0 ||
 		jrp.BackoffMultiplier <= 0 ||
 		len(jrp.RetryableStatusCodes) == 0 {
-		logger.Warningf("grpc: ignoring retry policy %v due to illegal configuration", jrp)
+		grpclog.Warningf("grpc: ignoring retry policy %v due to illegal configuration", jrp)
 		return nil, nil
 	}
 

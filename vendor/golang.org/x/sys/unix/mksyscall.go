@@ -86,13 +86,15 @@ func parseParam(p string) Param {
 }
 
 func main() {
-	goos := os.Getenv("GOOS_TARGET")
-	if goos == "" {
-		goos = os.Getenv("GOOS")
-	}
+	// Get the OS and architecture (using GOARCH_TARGET if it exists)
+	goos := os.Getenv("GOOS")
 	if goos == "" {
 		fmt.Fprintln(os.Stderr, "GOOS not defined in environment")
 		os.Exit(1)
+	}
+	goarch := os.Getenv("GOARCH_TARGET")
+	if goarch == "" {
+		goarch = os.Getenv("GOARCH")
 	}
 
 	// Check that we are using the Docker-based build system if we should
@@ -119,7 +121,7 @@ func main() {
 	}
 
 	libc := false
-	if goos == "darwin" {
+	if goos == "darwin" && (strings.Contains(buildTags(), ",go1.12") || strings.Contains(buildTags(), ",go1.13")) {
 		libc = true
 	}
 	trampolines := map[string]bool{}
@@ -150,6 +152,11 @@ func main() {
 				os.Exit(1)
 			}
 			funct, inps, outps, sysname := f[2], f[3], f[4], f[5]
+
+			// ClockGettime doesn't have a syscall number on Darwin, only generate libc wrappers.
+			if goos == "darwin" && !libc && funct == "ClockGettime" {
+				continue
+			}
 
 			// Split argument lists on comma.
 			in := parseParamList(inps)
