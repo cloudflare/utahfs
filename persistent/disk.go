@@ -6,7 +6,7 @@ import (
 	"os"
 	"path"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 type disk struct {
@@ -18,7 +18,7 @@ func NewDisk(loc string) (ObjectStorage, error) {
 	if err := os.MkdirAll(path.Dir(loc), 0744); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", loc)
+	db, err := sql.Open("sqlite3", loc)
 	if err != nil {
 		return nil, err
 	}

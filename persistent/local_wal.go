@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -49,7 +49,7 @@ func NewLocalWAL(base ObjectStorage, loc string, maxSize, parallelism int) (Reli
 	if err := os.MkdirAll(path.Dir(loc), 0744); err != nil {
 		return nil, err
 	}
-	local, err := sql.Open("sqlite", loc)
+	local, err := sql.Open("sqlite3", loc)
 	if err != nil {
 		return nil, err
 	}

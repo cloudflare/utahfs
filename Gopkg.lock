@@ -162,12 +162,12 @@
   version = "v0.9.1"
 
 [[projects]]
-  digest = "1:0c58d31abe2a2ccb429c559b6292e7df89dcda675456fecc282fa90aa08273eb"
-  name = "github.com/mattn/go-isatty"
+  digest = "1:047349f9fa59b1c603d6a73f6bf9b03c9e2ac718f64a6ed04959ddc274903efc"
+  name = "github.com/mattn/go-sqlite3"
   packages = ["."]
   pruneopts = "UT"
-  revision = "7b513a986450394f7bbf1476909911b3aa3a55ce"
-  version = "v0.0.12"
+  revision = "baaf8a978416040e7f2d00ac36e345098d0588d8"
+  version = "v1.14.0"
 
 [[projects]]
   digest = "1:ff5ebae34cfbf047d505ee150de27e60570e8c394b3b8fdbb720ff6ac71985fc"
@@ -232,14 +232,6 @@
   pruneopts = "UT"
   revision = "3a900613711866765af641f387dad41b639dbdc4"
   version = "v0.1.3"
-
-[[projects]]
-  branch = "master"
-  digest = "1:66bcd8ca25ea0a6f51ce23bc8ed6ccbf7d131b8dd1234c11b9fe8216c3f9c7b6"
-  name = "github.com/remyoudompheng/bigfft"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "eec4a21b6bb01e5c1260ca5e04d0c58e11e20f30"
 
 [[projects]]
   digest = "1:754aa6dc8ab333bda347a7d4732ac4bb30cbdc8cfe87af31813723d71980324f"
@@ -565,85 +557,6 @@
   revision = "0b1645d91e851e735d3e23330303ce81f70adbe3"
   version = "v2.3.0"
 
-[[projects]]
-  digest = "1:f9fb5e575e7d4298d6ad694b0712dc2813aa3c9ec4e862d9ffff2bb265f7c490"
-  name = "modernc.org/cc"
-  packages = ["v3"]
-  pruneopts = "UT"
-  revision = "9ff2e70a3262c18d7d8f02f63420345b0f1e5dc8"
-  version = "v3.26.0"
-
-[[projects]]
-  digest = "1:e300d2ae881970009bc93704f674ebea379b1d282c191c34123eda52444c2572"
-  name = "modernc.org/libc"
-  packages = [
-    ".",
-    "errno",
-    "fcntl",
-    "fts",
-    "grp",
-    "honnef.co/go/netdb",
-    "langinfo",
-    "limits",
-    "netdb",
-    "netinet/in",
-    "pwd",
-    "signal",
-    "stdio",
-    "sys/socket",
-    "sys/stat",
-    "sys/types",
-    "termios",
-    "time",
-    "unistd",
-  ]
-  pruneopts = "UT"
-  revision = "b3aa1596bd495d3feff88f563519b18c92b399ce"
-  version = "v1.3.1"
-
-[[projects]]
-  digest = "1:7c6c4924e628db9d8c0dc62d5433cb4d148bda5d08b7f87454a1d638c2dfc58f"
-  name = "modernc.org/mathutil"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "2a1ec38753120140e021fd5f51912fc600f7f4de"
-  version = "v1.1.1"
-
-[[projects]]
-  digest = "1:66950679ec1934fa761845d0927c10db8cff25dddfa900269f655e16730aafdf"
-  name = "modernc.org/memory"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "456baf95175317ca2a91a541bfaba19151a9d817"
-  version = "v1.0.1"
-
-[[projects]]
-  digest = "1:a11ae62f7fce0bf714b4df309a8cc21cb1ce2e73ffa84dd30864f0c50ff15b25"
-  name = "modernc.org/sqlite"
-  packages = [
-    ".",
-    "lib",
-  ]
-  pruneopts = "UT"
-  revision = "4e59395a6063396be299d3f16168744f1f7cf787"
-  version = "v1.7.2"
-
-[[projects]]
-  digest = "1:53713f38dfcb6cf3b8cb5c8d01541a2dcab03e0d4351b7839e84f22ef4dd98d6"
-  name = "modernc.org/strutil"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "9654ad6deeb404d1ca68c1d66d008bbaf3e2c50e"
-  version = "v1.1.0"
-
-[[projects]]
-  digest = "1:3e2c6a84bbb17446c08ffe16fad5e59555d49a6036ab99a6270d8a6040a480f0"
-  name = "modernc.org/token"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "46658f20d51b8d0b6c4c551c363c8510c30c2a72"
-  version = "v1.0.0"
-
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
@@ -657,6 +570,7 @@
     "github.com/jacobsa/fuse",
     "github.com/jacobsa/fuse/fuseops",
     "github.com/jacobsa/fuse/fuseutil",
+    "github.com/mattn/go-sqlite3",
     "github.com/prometheus/client_golang/prometheus",
     "github.com/prometheus/client_golang/prometheus/promhttp",
     "golang.org/x/crypto/argon2",
@@ -664,7 +578,6 @@
     "golang.org/x/crypto/ssh/terminal",
     "gopkg.in/kothar/go-backblaze.v0",
     "gopkg.in/yaml.v2",
-    "modernc.org/sqlite",
   ]
   solver-name = "gps-cdcl"
   solver-version = 1
