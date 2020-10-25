@@ -129,7 +129,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:bafaeb886784d51f37fdebf0ca09a2dddea682673dbaa2af3a29dbe209f38002"
+  digest = "1:1603e01807282b28d48f5f735b92f6745b8f2932c6433a558e0d5ac6ba373505"
   name = "github.com/jacobsa/fuse"
   packages = [
     ".",
@@ -140,7 +140,7 @@
     "internal/fusekernel",
   ]
   pruneopts = "UT"
-  revision = "9ed0e374218969558008d63ef37fc03aeef0b5cf"
+  revision = "f8927095af0331bb07dc5bf3628998f6164a32d6"
 
 [[projects]]
   digest = "1:bb81097a5b62634f3e9fec1014657855610c82d19b9a40c17612e32651e35dca"
