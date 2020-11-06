@@ -41,7 +41,7 @@ func main() {
 	log.Printf("Total blocks: %v", size)
 
 	for ptr := uint64(0); ptr < size; ptr++ {
-		if ptr%1000000 == 0 {
+		if ptr%10000 == 0 {
 			log.Printf("... read %v blocks", ptr)
 		}
 		if _, err = block.Get(ctx, ptr); err != nil {
