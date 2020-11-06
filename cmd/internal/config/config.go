@@ -238,11 +238,7 @@ func (c *Client) remoteStorage() (persistent.ReliableStorage, error) {
 	return persistent.NewRemoteClient(c.RemoteServer.TransportKey, c.RemoteServer.URL, c.ORAM)
 }
 
-func (c *Client) FS(mountPath string) (*utahfs.BlockFilesystem, error) {
-	if c.DataDir == "" {
-		c.DataDir = path.Join(path.Dir(mountPath), ".utahfs")
-	}
-
+func (c *Client) Block(needIntegrity bool) (persistent.BlockStorage, error) {
 	// Stub out generation of the ReliableStorage interface, depending on if
 	// this client is standalone or backed by a server.
 	var (
@@ -277,8 +273,23 @@ func (c *Client) FS(mountPath string) (*utahfs.BlockFilesystem, error) {
 		if err != nil {
 			return nil, err
 		}
+	} else if needIntegrity {
+		return nil, fmt.Errorf("rollback prevention is delegated to remote server because ORAM is enabled")
 	} else {
 		log.Println("WARNING: delegating rollback prevention to remote server because ORAM is enabled")
+	}
+
+	return block, nil
+}
+
+func (c *Client) FS(mountPath string) (*utahfs.BlockFilesystem, error) {
+	if c.DataDir == "" {
+		c.DataDir = path.Join(path.Dir(mountPath), ".utahfs")
+	}
+
+	block, err := c.Block(false)
+	if err != nil {
+		return nil, err
 	}
 	block = persistent.WithEncryption(block, c.Password)
 

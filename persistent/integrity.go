@@ -238,6 +238,8 @@ func (i *integrity) Start(ctx context.Context, prefetch []uint64) (map[uint64][]
 	return nil, nil
 }
 
+func (i *integrity) TreeSize() uint64 { return i.curr.Nodes }
+
 func (i *integrity) getMeta(ptr uint64) (ptrs []uint64, checks [][2]uint64) {
 	ptrs = []uint64{dataPtr(ptr)}
 
