@@ -113,7 +113,7 @@ type oblivious struct {
 
 	integ *integrity
 
-	// needRollback is set to true when an error condition has occured while
+	// needRollback is set to true when an error condition has occurred while
 	// performing ORAM operations and it's safest to lose some privacy
 	// guarantees and just start over.
 	needRollback bool
@@ -360,7 +360,7 @@ func (o *oblivious) buildBucket(ctx context.Context, node uint64, assignments ma
 
 func (o *oblivious) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]byte, error) {
 	if o.needRollback {
-		return nil, fmt.Errorf("oblivious: an error condition has occured, please rollback")
+		return nil, fmt.Errorf("oblivious: an error condition has occurred, please rollback")
 	}
 	out := make(map[uint64][]byte)
 	if len(ptrs) == 0 || o.store.Count == 0 {
@@ -388,7 +388,7 @@ func (o *oblivious) GetMany(ctx context.Context, ptrs []uint64) (map[uint64][]by
 
 func (o *oblivious) Set(ctx context.Context, ptr uint64, data []byte, _ DataType) error {
 	if o.needRollback {
-		return fmt.Errorf("oblivious: an error condition has occured, please rollback")
+		return fmt.Errorf("oblivious: an error condition has occurred, please rollback")
 	}
 
 	assignments, err := o.startAccess(ctx, []uint64{ptr})
@@ -415,7 +415,7 @@ func (o *oblivious) Set(ctx context.Context, ptr uint64, data []byte, _ DataType
 
 func (o *oblivious) Commit(ctx context.Context) error {
 	if o.needRollback {
-		return fmt.Errorf("oblivious: an error condition has occured, please rollback")
+		return fmt.Errorf("oblivious: an error condition has occurred, please rollback")
 	}
 
 	if err := o.store.Commit(ctx, o.integ.curr.Version); err != nil {
