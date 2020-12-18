@@ -50,3 +50,5 @@ func (d *disk) Delete(ctx context.Context, key string) error {
 	_, err := d.db.ExecContext(ctx, "DELETE FROM db WHERE key = ?", key)
 	return err
 }
+
+func (d *disk) PurgeCache(ctx context.Context, keys []string) error { return nil }

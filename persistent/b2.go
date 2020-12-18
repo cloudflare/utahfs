@@ -133,3 +133,5 @@ func (b *b2) Delete(ctx context.Context, key string) error {
 	B2Ops.WithLabelValues("delete", "true").Inc()
 	return nil
 }
+
+func (b *b2) PurgeCache(ctx context.Context, keys []string) error { return nil }

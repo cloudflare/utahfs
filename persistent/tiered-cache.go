@@ -47,3 +47,12 @@ func (tc *tieredCache) Delete(ctx context.Context, key string) error {
 	}
 	return tc.base.Delete(ctx, key)
 }
+
+func (tc *tieredCache) PurgeCache(ctx context.Context, keys []string) error {
+	for _, key := range keys {
+		if err := tc.high.Delete(ctx, key); err != nil {
+			return err
+		}
+	}
+	return tc.base.PurgeCache(ctx, keys)
+}

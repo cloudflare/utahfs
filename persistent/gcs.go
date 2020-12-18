@@ -83,3 +83,5 @@ func (g *gcs) Delete(ctx context.Context, key string) error {
 	GCSOps.WithLabelValues("delete", "true").Inc()
 	return nil
 }
+
+func (g *gcs) PurgeCache(ctx context.Context, keys []string) error { return nil }

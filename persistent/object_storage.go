@@ -29,6 +29,8 @@ func (m memory) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
+func (m memory) PurgeCache(ctx context.Context, keys []string) error { return nil }
+
 type retry struct {
 	base     ObjectStorage
 	attempts int
@@ -76,6 +78,10 @@ func (r *retry) Delete(ctx context.Context, key string) (err error) {
 	return
 }
 
+func (r *retry) PurgeCache(ctx context.Context, keys []string) error {
+	return r.base.PurgeCache(ctx, keys)
+}
+
 type prefix struct {
 	base   ObjectStorage
 	prefix string
@@ -97,4 +103,12 @@ func (p *prefix) Set(ctx context.Context, key string, data []byte, dt DataType) 
 
 func (p *prefix) Delete(ctx context.Context, key string) error {
 	return p.base.Delete(ctx, p.prefix+key)
+}
+
+func (p *prefix) PurgeCache(ctx context.Context, keys []string) error {
+	temp := make([]string, 0, len(keys))
+	for _, key := range keys {
+		temp = append(temp, p.prefix+key)
+	}
+	return p.base.PurgeCache(ctx, temp)
 }

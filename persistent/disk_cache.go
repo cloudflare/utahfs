@@ -208,3 +208,19 @@ func (dc *diskCache) Delete(ctx context.Context, key string) error {
 	dc.removeFromCache(ctx, key)
 	return err
 }
+
+func (dc *diskCache) PurgeCache(ctx context.Context, keys []string) error {
+	for _, key := range keys {
+		dc.mapMu.Lock(key)
+	}
+	defer func() {
+		for _, key := range keys {
+			dc.mapMu.Unlock(key)
+		}
+	}()
+
+	for _, key := range keys {
+		dc.removeFromCache(ctx, key)
+	}
+	return dc.base.PurgeCache(ctx, keys)
+}

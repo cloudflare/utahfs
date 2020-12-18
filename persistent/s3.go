@@ -89,3 +89,5 @@ func (s *s3Client) Delete(ctx context.Context, key string) error {
 	S3Ops.WithLabelValues("delete", "true").Inc()
 	return nil
 }
+
+func (s *s3Client) PurgeCache(ctx context.Context, keys []string) error { return nil }

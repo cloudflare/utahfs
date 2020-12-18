@@ -36,6 +36,8 @@ type ObjectStorage interface {
 	Set(ctx context.Context, key string, data []byte, dt DataType) (err error)
 	// Delete removes the object with the given key.
 	Delete(ctx context.Context, key string) (err error)
+	// PurgeCache removes possibly invalid values from cache.
+	PurgeCache(ctx context.Context, keys []string) error
 }
 
 type WriteData struct {
