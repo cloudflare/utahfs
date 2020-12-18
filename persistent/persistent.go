@@ -71,6 +71,8 @@ type BlockStorage interface {
 
 	Commit(ctx context.Context) error
 	Rollback(ctx context.Context)
+
+	PurgeCache(ctx context.Context, ptrs []uint64) error
 }
 
 // ObliviousStorage defines the interface an ORAM implementation would use to

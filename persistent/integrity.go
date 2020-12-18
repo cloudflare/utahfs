@@ -465,3 +465,7 @@ func (i *integrity) Rollback(ctx context.Context) {
 	i.base.Rollback(ctx)
 	i.curr = nil
 }
+
+func (i *integrity) PurgeCache(ctx context.Context, ptrs []uint64) error {
+	return i.base.PurgeCache(ctx, ptrs)
+}

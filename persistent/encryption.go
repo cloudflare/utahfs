@@ -152,3 +152,7 @@ func (e *encryption) Set(ctx context.Context, ptr uint64, data []byte, dt DataTy
 
 func (e *encryption) Commit(ctx context.Context) error { return e.base.Commit(ctx) }
 func (e *encryption) Rollback(ctx context.Context)     { e.base.Rollback(ctx) }
+
+func (e *encryption) PurgeCache(ctx context.Context, ptrs []uint64) error {
+	return e.base.PurgeCache(ctx, ptrs)
+}

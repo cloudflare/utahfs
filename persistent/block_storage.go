@@ -41,3 +41,7 @@ func (bm blockMemory) Set(ctx context.Context, ptr uint64, data []byte, _ DataTy
 
 func (bm blockMemory) Commit(ctx context.Context) error { return nil }
 func (bm blockMemory) Rollback(ctx context.Context)     {}
+
+func (bm blockMemory) PurgeCache(ctx context.Context, ptrs []uint64) error {
+	panic("cache purging not implemented")
+}

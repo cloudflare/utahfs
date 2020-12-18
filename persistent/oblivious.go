@@ -456,6 +456,10 @@ func (o *oblivious) Rollback(ctx context.Context) {
 	return
 }
 
+func (o *oblivious) PurgeCache(ctx context.Context, ptrs []uint64) error {
+	return o.base.PurgeCache(ctx, ptrs)
+}
+
 // All the code below this line is only used for testing.
 
 func (o *oblivious) dirtyRollback(ctx context.Context) {
@@ -505,3 +509,7 @@ func (oa *oramAuditor) Set(ctx context.Context, ptr uint64, data []byte, dt Data
 
 func (oa *oramAuditor) Commit(ctx context.Context) error { return oa.base.Commit(ctx) }
 func (oa *oramAuditor) Rollback(ctx context.Context)     { oa.base.Rollback(ctx) }
+
+func (oa *oramAuditor) PurgeCache(ctx context.Context, ptrs []uint64) error {
+	return oa.base.PurgeCache(ctx, ptrs)
+}

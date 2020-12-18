@@ -105,3 +105,7 @@ func (bs *BufferedStorage) Rollback(ctx context.Context) {
 	bs.base.Commit(ctx, nil)
 	bs.pending = nil
 }
+
+func (bs *BufferedStorage) PurgeCache(ctx context.Context, ptrs []uint64) error {
+	return bs.base.PurgeCache(ctx, ptrs)
+}
