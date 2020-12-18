@@ -295,3 +295,11 @@ func (lw *localWAL) Commit(ctx context.Context, writes map[uint64]WriteData) err
 
 	return tx.Commit()
 }
+
+func (lw *localWAL) PurgeCache(ctx context.Context, keys []uint64) error {
+	temp := make([]string, 0, len(keys))
+	for _, key := range keys {
+		temp = append(temp, hex(key))
+	}
+	return lw.base.PurgeCache(ctx, temp)
+}

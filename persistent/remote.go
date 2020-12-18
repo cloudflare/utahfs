@@ -384,6 +384,18 @@ func (rc *remoteClient) Commit(ctx context.Context, writes map[uint64]WriteData)
 	return err
 }
 
+func (rc *remoteClient) PurgeCache(ctx context.Context, keys []uint64) error {
+	id := rc.getId()
+	if id == "" {
+		return fmt.Errorf("remote: transaction not active")
+	}
+	loc := "purge-cache?id=" + id
+	for _, key := range keys {
+		loc += "&key=" + hex(key)
+	}
+	return rc.post(ctx, loc, nil)
+}
+
 type remoteServer struct {
 	requestMu     sync.Mutex
 	transactionMu sync.Mutex
@@ -453,6 +465,8 @@ func (rs *remoteServer) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		rs.handleGet(rw, req)
 	case req.Method == "POST" && strings.HasSuffix(req.URL.Path, "/commit"):
 		rs.handleCommit(rw, req)
+	case req.Method == "POST" && strings.HasSuffix(req.URL.Path, "/purge-cache"):
+		rs.handlePurgeCache(rw, req)
 	case req.Method == "POST" && strings.HasSuffix(req.URL.Path, "/ping"):
 		rs.handlePing(rw, req)
 	default:
@@ -561,6 +575,27 @@ func (rs *remoteServer) handleCommit(rw http.ResponseWriter, req *http.Request) 
 		return
 	}
 
+	rw.WriteHeader(http.StatusOK)
+}
+
+func (rs *remoteServer) handlePurgeCache(rw http.ResponseWriter, req *http.Request) {
+	if req.Form.Get("id") != rs.transactionId {
+		rw.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	keys, err := parseKeys(req.Form["key"])
+	if err != nil {
+		log.Println(err)
+		rw.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	err = rs.base.PurgeCache(req.Context(), keys)
+	if err != nil {
+		log.Println(err)
+		rw.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 	rw.WriteHeader(http.StatusOK)
 }
 

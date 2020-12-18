@@ -48,6 +48,14 @@ func (sr *simpleReliable) Commit(ctx context.Context, writes map[uint64]WriteDat
 	return nil
 }
 
+func (sr *simpleReliable) PurgeCache(ctx context.Context, keys []uint64) error {
+	temp := make([]string, 0, len(keys))
+	for _, key := range keys {
+		temp = append(temp, hex(key))
+	}
+	return sr.base.PurgeCache(ctx, temp)
+}
+
 type cacheStorage struct {
 	base  ReliableStorage
 	cache *cache.Cache
@@ -147,6 +155,11 @@ func (c *cacheStorage) Commit(ctx context.Context, writes map[uint64]WriteData) 
 		}
 	}
 	return nil
+}
+
+func (c *cacheStorage) PurgeCache(ctx context.Context, keys []uint64) error {
+	// Intentionally ignoring the in-memory cache.
+	return c.base.PurgeCache(ctx, keys)
 }
 
 type blockReliable struct {

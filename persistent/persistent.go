@@ -58,6 +58,8 @@ type ReliableStorage interface {
 	// Commit persists the changes in `writes` to the backend, atomically. If
 	// the value of a key is nil, then that key is deleted.
 	Commit(ctx context.Context, writes map[uint64]WriteData) error
+
+	PurgeCache(ctx context.Context, keys []uint64) error
 }
 
 // BlockStorage is a derivative of ObjectStorage that uses uint64 pointers as
