@@ -259,6 +259,7 @@ func (i *integrity) validateGet(ptrs []uint64, checks [][2]uint64, data map[uint
 		} else if len(block) != 8*32 {
 			return fmt.Errorf("integrity: checksum block is malformed")
 		} else if !bytes.Equal(expected[:], block[32*check[1]:32*check[1]+32]) {
+			i.base.PurgeCache(context.Background(), ptrs)
 			return fmt.Errorf("integrity: block does not equal expected value")
 		}
 		expected = intermediateHash(block)
