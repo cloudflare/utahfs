@@ -158,7 +158,9 @@ func (c *cacheStorage) Commit(ctx context.Context, writes map[uint64]WriteData) 
 }
 
 func (c *cacheStorage) PurgeCache(ctx context.Context, keys []uint64) error {
-	// Intentionally ignoring the in-memory cache.
+	for _, key := range keys {
+		c.cache.Delete(key)
+	}
 	return c.base.PurgeCache(ctx, keys)
 }
 
