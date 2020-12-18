@@ -420,7 +420,7 @@ func (fs *filesystem) OpenDir(ctx context.Context, op *fuseops.OpenDirOp) error 
 		childID := nd.Children[name]
 		child, err := fs.nm.Open(ctx, fs.ptr(childID))
 		if err != nil {
-			return fmt.Errorf("failed to open inode for child")
+			return fmt.Errorf("failed to open inode for child: %v", err)
 		}
 
 		children[name] = fuseops.ChildInodeEntry{
