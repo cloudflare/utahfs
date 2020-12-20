@@ -23,7 +23,7 @@ Features
    shrink if that data is deleted. Instead, that space is left allocated and
    will be re-used if needed in the future.
 3. **Local Hardware allows Multiple Users and Improved Performance.** If the
-   user has server-like hardware on their LAN (Rasberry Pi / Intel NUC), this
+   user has server-like hardware on their LAN (Raspberry Pi / Intel NUC), this
    can be used to coordinate multiple users operating in the same archive. It
    can also dramatically improve the performance of uploads, because a user can
    upload large amounts of already-encrypted data to the server over the fast
