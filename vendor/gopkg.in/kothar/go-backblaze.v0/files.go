@@ -182,6 +182,29 @@ func (b *Bucket) UploadHashedTypedFile(
 	return result, nil
 }
 
+// CopyFile copies file
+//
+// If destination bucket is empty, file will be copy to the current file's bucket
+func (b *Bucket) CopyFile(fileID, fileName, destinationBucketId string, metadataDirective FileMetadataDirective) (*File, error) {
+	request := &fileCopyRequest{
+		ID:                fileID,
+		Name:              fileName,
+		MetadataDirective: metadataDirective,
+	}
+
+	if destinationBucketId != "" {
+		request.DestinationBucketID = destinationBucketId
+	}
+
+	response := &File{}
+
+	if err := b.b2.apiRequest("b2_copy_file", request, response); err != nil {
+		return nil, err
+	}
+
+	return response, nil
+}
+
 // GetFileInfo retrieves information about one file stored in B2.
 func (b *Bucket) GetFileInfo(fileID string) (*File, error) {
 	request := &fileRequest{

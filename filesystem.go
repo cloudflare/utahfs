@@ -376,7 +376,7 @@ func (fs *filesystem) rename(ctx context.Context, op *fuseops.RenameOp, archive 
 }
 
 func (fs *filesystem) RmDir(ctx context.Context, op *fuseops.RmDirOp) error {
-	return fs.Unlink(ctx, &fuseops.UnlinkOp{op.Parent, op.Name})
+	return fs.Unlink(ctx, &fuseops.UnlinkOp{op.Parent, op.Name, op.OpContext})
 }
 
 func (fs *filesystem) Unlink(ctx context.Context, op *fuseops.UnlinkOp) error {

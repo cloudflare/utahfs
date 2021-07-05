@@ -189,10 +189,24 @@ type ListFileVersionsResponse struct {
 	NextFileID   string       `json:"nextFileId"`
 }
 
+type fileCopyRequest struct {
+	ID                  string                `json:"sourceFileId"`
+	Name                string                `json:"fileName"`
+	MetadataDirective   FileMetadataDirective `json:"metadataDirective"`
+	DestinationBucketID string                `json:"destinationBucketId"`
+}
+
 type hideFileRequest struct {
 	BucketID string `json:"bucketId"`
 	FileName string `json:"fileName"`
 }
+
+type FileMetadataDirective string
+
+const (
+	FileMetaDirectiveCopy    FileMetadataDirective = "COPY"
+	FileMetaDirectiveReplace FileMetadataDirective = "REPLACE"
+)
 
 // FileAction indicates the current status of a file in a B2 bucket
 type FileAction string
