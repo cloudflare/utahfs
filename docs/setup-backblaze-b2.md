@@ -8,8 +8,7 @@ Setup Backblaze B2
 3. Create a bucket. The bucket should be public and be named the random
    string you generated above; also set the random string as `b2-bucket` in
    your config.
-4. Click on "Lifecycle Settings", choose "Keep prior versions for 7 days",
-   submit.
+4. Enable "Default Encryption", disable "Object Lock" and Submit.
 5. Click "App Keys" in the sidebar. Save the keyID for "Master Application Key"
    as `b2-acct-id` in your config. Select "Generate New Master Application Key"
    (or use the one you already know) and save the application key as
