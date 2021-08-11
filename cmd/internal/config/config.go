@@ -25,6 +25,7 @@ func maxSize(numPtrs, dataSize int64) int64 {
 type StorageProvider struct {
 	// Backblaze B2
 	B2AcctId string `yaml:"b2-acct-id"`
+	B2KeyId  string `yaml:"b2-key-id"`
 	B2AppKey string `yaml:"b2-app-key"`
 	B2Bucket string `yaml:"b2-bucket"`
 	B2Url    string `yaml:"b2-url"`
@@ -91,7 +92,7 @@ func (sp *StorageProvider) Store() (persistent.ObjectStorage, error) {
 		err error
 	)
 	if sp.hasB2() {
-		out, err = persistent.NewB2(sp.B2AcctId, sp.B2AppKey, sp.B2Bucket, sp.B2Url)
+		out, err = persistent.NewB2(sp.B2AcctId, sp.B2KeyId, sp.B2AppKey, sp.B2Bucket, sp.B2Url)
 	} else if sp.hasS3() {
 		out, err = persistent.NewS3(sp.S3AppId, sp.S3AppKey, sp.S3Bucket, sp.S3Url, sp.S3Region)
 	} else if sp.hasGCS() {
