@@ -47,14 +47,23 @@ type b2 struct {
 
 // NewB2 returns object storage backed by Backblaze B2. `acctId` and `appKey`
 // are the Account ID and Application Key of a B2 bucket. `bucketName` is the
-// name of the bucket. `url` is the URL to use to download data.
-func NewB2(acctId, appKey, bucketName, url string) (ObjectStorage, error) {
+// name of the bucket. `url` is the URL to use to download data. Keys other than
+// the master key can be used by omitting the account key and providing the key
+// ID provided by B2 with the key.
+func NewB2(acctId, keyId, appKey, bucketName, url string) (ObjectStorage, error) {
+	creds := backblaze.Credentials{
+		AccountID:      acctId,
+		ApplicationKey: appKey,
+		KeyID:          keyId,
+	}
+
+	if acctId != "" {
+		creds.KeyID = ""
+	}
+
 	pool := &sync.Pool{
 		New: func() interface{} {
-			conn, err := backblaze.NewB2(backblaze.Credentials{
-				AccountID:      acctId,
-				ApplicationKey: appKey,
-			})
+			conn, err := backblaze.NewB2(creds)
 			if err != nil {
 				return err
 			}
