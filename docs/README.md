@@ -19,10 +19,9 @@ storage-provider:
   s3-url: # URL of service.
   s3-region: # Name of region.
   # # Alternatively, remove the above s3-* keys and setup Backblaze B2 access:
-  # b2-acct-id:
+  # b2-key-id:
   # b2-app-key:
   # b2-bucket:
-  # b2-url:
   # # Or finally, use GCS:
   # gcs-bucket-name:
 
