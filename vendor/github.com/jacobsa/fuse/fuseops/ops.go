@@ -220,6 +220,32 @@ type ForgetInodeOp struct {
 	OpContext OpContext
 }
 
+// BatchForgetEntry represents one Inode entry to forget in the BatchForgetOp.
+//
+// Everything written in the ForgetInodeOp docs applies for the BatchForgetEntry
+// too.
+type BatchForgetEntry struct {
+	// The inode whose reference count should be decremented.
+	Inode InodeID
+
+	// The amount to decrement the reference count.
+	N uint64
+}
+
+// Decrement the reference counts for a list of inode IDs previously issued by the file
+// system.
+//
+// This operation is a batch of ForgetInodeOp operations. Every entry in
+// Entries is one ForgetInodeOp operation. See the docs of ForgetInodeOp
+// for further details.
+type BatchForgetOp struct {
+	// Entries is a list of Forget operations. One could treat every entry in the
+	// list as a single ForgetInodeOp operation.
+	Entries []BatchForgetEntry
+
+	OpContext OpContext
+}
+
 ////////////////////////////////////////////////////////////////////////
 // Inode creation
 ////////////////////////////////////////////////////////////////////////
@@ -311,7 +337,7 @@ type CreateFileOp struct {
 	// The handle may be supplied in future ops like ReadFileOp that contain a
 	// file handle. The file system must ensure this ID remains valid until a
 	// later call to ReleaseFileHandle.
-	Handle HandleID
+	Handle    HandleID
 	OpContext OpContext
 }
 
@@ -443,7 +469,7 @@ type UnlinkOp struct {
 
 // Open a directory inode.
 //
-// On Linux the sends this when setting up a struct file for a particular inode
+// On Linux the kernel sends this when setting up a struct file for a particular inode
 // with type directory, usually in response to an open(2) call from a
 // user-space process. On OS X it may not be sent for every open(2) (cf.
 // https://github.com/osxfuse/osxfuse/issues/199).
@@ -578,7 +604,7 @@ type ReleaseDirHandleOp struct {
 
 // Open a file inode.
 //
-// On Linux the sends this when setting up a struct file for a particular inode
+// On Linux the kernel sends this when setting up a struct file for a particular inode
 // with type file, usually in response to an open(2) call from a user-space
 // process. On OS X it may not be sent for every open(2)
 // (cf.https://github.com/osxfuse/osxfuse/issues/199).
@@ -637,8 +663,16 @@ type ReadFileOp struct {
 	// The offset within the file at which to read.
 	Offset int64
 
+	// The size of the read.
+	Size int64
+
 	// The destination buffer, whose length gives the size of the read.
+	// For vectored reads, this field is always nil as the buffer is not provided.
 	Dst []byte
+
+	// Set by the file system:
+	// A list of slices of data to send back to the client for vectored reads.
+	Data [][]byte
 
 	// Set by the file system: the number of bytes read.
 	//
@@ -787,8 +821,8 @@ type SyncFileOp struct {
 // return any errors that occur.
 type FlushFileOp struct {
 	// The file and handle being flushed.
-	Inode  InodeID
-	Handle HandleID
+	Inode     InodeID
+	Handle    HandleID
 	OpContext OpContext
 }
 

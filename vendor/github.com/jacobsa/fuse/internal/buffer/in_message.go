@@ -25,25 +25,31 @@ import (
 
 // All requests read from the kernel, without data, are shorter than
 // this.
-const pageSize = 4096
-
-func init() {
-	// Confirm the page size.
-	if syscall.Getpagesize() != pageSize {
-		panic(fmt.Sprintf("Page size is unexpectedly %d", syscall.Getpagesize()))
-	}
-}
+var pageSize int
 
 // We size the buffer to have enough room for a fuse request plus data
 // associated with a write request.
-const bufSize = pageSize + MaxWriteSize
+var bufSize int
+
+func init() {
+	pageSize = syscall.Getpagesize()
+	bufSize = pageSize + MaxWriteSize
+}
 
 // An incoming message from the kernel, including leading fusekernel.InHeader
 // struct. Provides storage for messages and convenient access to their
 // contents.
 type InMessage struct {
 	remaining []byte
-	storage   [bufSize]byte
+	storage   []byte
+	size      int
+}
+
+// NewInMessage creates a new InMessage with its storage initialized.
+func NewInMessage() *InMessage {
+	return &InMessage{
+		storage: make([]byte, bufSize),
+	}
 }
 
 // Initialize with the data read by a single call to r.Read. The first call to
@@ -61,6 +67,7 @@ func (m *InMessage) Init(r io.Reader) error {
 		return fmt.Errorf("Unexpectedly read only %d bytes.", n)
 	}
 
+	m.size = n
 	m.remaining = m.storage[headerSize:n]
 
 	// Check the header's length.
@@ -108,4 +115,12 @@ func (m *InMessage) ConsumeBytes(n uintptr) []byte {
 	m.remaining = m.remaining[n:]
 
 	return b
+}
+
+// Get the next n bytes after the message to use them as a temporary buffer
+func (m *InMessage) GetFree(n int) []byte {
+	if n <= 0 || n > len(m.storage)-m.size {
+		return nil
+	}
+	return m.storage[m.size : m.size+n]
 }

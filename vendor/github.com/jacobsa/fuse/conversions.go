@@ -38,6 +38,7 @@ import (
 //
 // The caller is responsible for arranging for the message to be destroyed.
 func convertInMessage(
+	config *MountConfig,
 	inMsg *buffer.InMessage,
 	outMsg *buffer.OutMessage,
 	protocol fusekernel.Protocol) (o interface{}, err error) {
@@ -109,6 +110,32 @@ func convertInMessage(
 		o = &fuseops.ForgetInodeOp{
 			Inode:     fuseops.InodeID(inMsg.Header().Nodeid),
 			N:         in.Nlookup,
+			OpContext: fuseops.OpContext{Pid: inMsg.Header().Pid},
+		}
+
+	case fusekernel.OpBatchForget:
+		type input fusekernel.BatchForgetCountIn
+		in := (*input)(inMsg.Consume(unsafe.Sizeof(input{})))
+		if in == nil {
+			return nil, errors.New("Corrupt OpBatchForget")
+		}
+
+		entries := make([]fuseops.BatchForgetEntry, 0, in.Count)
+		for i := uint32(0); i < in.Count; i++ {
+			type entry fusekernel.BatchForgetEntryIn
+			ein := (*entry)(inMsg.Consume(unsafe.Sizeof(entry{})))
+			if ein == nil {
+				return nil, errors.New("Corrupt OpBatchForget")
+			}
+
+			entries = append(entries, fuseops.BatchForgetEntry{
+				Inode: fuseops.InodeID(ein.Inode),
+				N:     ein.Nlookup,
+			})
+		}
+
+		o = &fuseops.BatchForgetOp{
+			Entries:   entries,
 			OpContext: fuseops.OpContext{Pid: inMsg.Header().Pid},
 		}
 
@@ -206,6 +233,19 @@ func convertInMessage(
 		}
 
 		names := inMsg.ConsumeBytes(inMsg.Len())
+		// closed-source macfuse 4.x has broken compatibility with osxfuse 3.x:
+		// it passes an additional 64-bit field (flags) after RenameIn regardless
+		// that we don't enable the support for RENAME_SWAP/RENAME_EXCL
+		// macfuse doesn't want change the behaviour back which is motivated by
+		// not breaking compatibility the second time, look here for details:
+		// https://github.com/osxfuse/osxfuse/issues/839
+		//
+		// the simplest fix is just to check for the presence of all-zero flags
+		if len(names) >= 8 &&
+			names[0] == 0 && names[1] == 0 && names[2] == 0 && names[3] == 0 &&
+			names[4] == 0 && names[5] == 0 && names[6] == 0 && names[7] == 0 {
+			names = names[8:]
+		}
 		// names should be "old\x00new\x00"
 		if len(names) < 4 {
 			return nil, errors.New("Corrupt OpRename")
@@ -275,20 +315,15 @@ func convertInMessage(
 			Inode:     fuseops.InodeID(inMsg.Header().Nodeid),
 			Handle:    fuseops.HandleID(in.Fh),
 			Offset:    int64(in.Offset),
+			Size:      int64(in.Size),
 			OpContext: fuseops.OpContext{Pid: inMsg.Header().Pid},
 		}
-		o = to
-
-		readSize := int(in.Size)
-		p := outMsg.GrowNoZero(readSize)
-		if p == nil {
-			return nil, fmt.Errorf("Can't grow for %d-byte read", readSize)
+		if !config.UseVectoredRead {
+			// Use part of the incoming message storage as the read buffer
+			// For vectored zero-copy reads, don't allocate any buffers
+			to.Dst = inMsg.GetFree(int(in.Size))
 		}
-
-		sh := (*reflect.SliceHeader)(unsafe.Pointer(&to.Dst))
-		sh.Data = uintptr(p)
-		sh.Len = readSize
-		sh.Cap = readSize
+		o = to
 
 	case fusekernel.OpReaddir:
 		in := (*fusekernel.ReadIn)(inMsg.Consume(fusekernel.ReadInSize(protocol)))
@@ -305,7 +340,7 @@ func convertInMessage(
 		o = to
 
 		readSize := int(in.Size)
-		p := outMsg.GrowNoZero(readSize)
+		p := outMsg.Grow(readSize)
 		if p == nil {
 			return nil, fmt.Errorf("Can't grow for %d-byte read", readSize)
 		}
@@ -358,7 +393,7 @@ func convertInMessage(
 			OpContext: fuseops.OpContext{Pid: inMsg.Header().Pid},
 		}
 
-	case fusekernel.OpFsync:
+	case fusekernel.OpFsync, fusekernel.OpFsyncdir:
 		type input fusekernel.FsyncIn
 		in := (*input)(inMsg.Consume(unsafe.Sizeof(input{})))
 		if in == nil {
@@ -476,15 +511,19 @@ func convertInMessage(
 		o = to
 
 		readSize := int(in.Size)
-		p := outMsg.GrowNoZero(readSize)
-		if p == nil {
-			return nil, fmt.Errorf("Can't grow for %d-byte read", readSize)
-		}
+		if readSize > 0 {
+			p := outMsg.Grow(readSize)
+			if p == nil {
+				return nil, fmt.Errorf("Can't grow for %d-byte read", readSize)
+			}
 
-		sh := (*reflect.SliceHeader)(unsafe.Pointer(&to.Dst))
-		sh.Data = uintptr(p)
-		sh.Len = readSize
-		sh.Cap = readSize
+			sh := (*reflect.SliceHeader)(unsafe.Pointer(&to.Dst))
+			sh.Data = uintptr(p)
+			sh.Len = readSize
+			sh.Cap = readSize
+		} else {
+			to.Dst = nil
+		}
 
 	case fusekernel.OpListxattr:
 		type input fusekernel.ListxattrIn
@@ -501,7 +540,7 @@ func convertInMessage(
 
 		readSize := int(in.Size)
 		if readSize != 0 {
-			p := outMsg.GrowNoZero(readSize)
+			p := outMsg.Grow(readSize)
 			if p == nil {
 				return nil, fmt.Errorf("Can't grow for %d-byte read", readSize)
 			}
@@ -580,6 +619,9 @@ func (c *Connection) kernelResponse(
 	// interruptOp .
 	switch op.(type) {
 	case *fuseops.ForgetInodeOp:
+		return true
+
+	case *fuseops.BatchForgetOp:
 		return true
 
 	case *interruptOp:
@@ -705,9 +747,11 @@ func (c *Connection) kernelResponseForOp(
 		}
 
 	case *fuseops.ReadFileOp:
-		// convertInMessage already set up the destination buffer to be at the end
-		// of the out message. We need only shrink to the right size based on how
-		// much the user read.
+		if o.Dst != nil {
+			m.Append(o.Dst)
+		} else {
+			m.Append(o.Data...)
+		}
 		m.ShrinkTo(buffer.OutMessageHeaderSize + o.BytesRead)
 
 	case *fuseops.WriteFileOp:
@@ -796,7 +840,12 @@ func (c *Connection) kernelResponseForOp(
 		out.Minor = o.Library.Minor
 		out.MaxReadahead = o.MaxReadahead
 		out.Flags = uint32(o.Flags)
+		// Default values
+		out.MaxBackground = 12
+		out.CongestionThreshold = 9
 		out.MaxWrite = o.MaxWrite
+		out.TimeGran = 1
+		out.MaxPages = o.MaxPages
 
 	default:
 		panic(fmt.Sprintf("Unexpected op: %#v", op))
