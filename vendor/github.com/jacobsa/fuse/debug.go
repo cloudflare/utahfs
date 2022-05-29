@@ -86,10 +86,16 @@ func describeRequest(op interface{}) (s string) {
 			addComponent("mtime %v", *typed.Mtime)
 		}
 
+	case *fuseops.RenameOp:
+		addComponent("old_parent %v", typed.OldParent)
+		addComponent("old_name %q", typed.OldName)
+		addComponent("new_parent %v", typed.NewParent)
+		addComponent("new_name %q", typed.NewName)
+
 	case *fuseops.ReadFileOp:
 		addComponent("handle %d", typed.Handle)
 		addComponent("offset %d", typed.Offset)
-		addComponent("%d bytes", len(typed.Dst))
+		addComponent("%d bytes", typed.Size)
 
 	case *fuseops.WriteFileOp:
 		addComponent("handle %d", typed.Handle)

@@ -81,7 +81,7 @@ github.com/golang/protobuf/ptypes/timestamp
 github.com/google/readahead
 # github.com/googleapis/gax-go/v2 v2.0.5
 github.com/googleapis/gax-go/v2
-# github.com/jacobsa/fuse v0.0.0-20210606185441-fac69e018fad
+# github.com/jacobsa/fuse v0.0.0-20220527064915-37d63df227ec
 ## explicit
 github.com/jacobsa/fuse
 github.com/jacobsa/fuse/fuseops
@@ -137,7 +137,7 @@ go.opencensus.io/trace
 go.opencensus.io/trace/internal
 go.opencensus.io/trace/propagation
 go.opencensus.io/trace/tracestate
-# golang.org/x/crypto v0.0.0-20210616213533-5ff15b29337e
+# golang.org/x/crypto v0.0.0-20220525230936-793ad666bf5e
 ## explicit
 golang.org/x/crypto/argon2
 golang.org/x/crypto/blake2b
@@ -149,7 +149,7 @@ golang.org/x/lint/golint
 # golang.org/x/mod v0.4.2
 golang.org/x/mod/module
 golang.org/x/mod/semver
-# golang.org/x/net v0.0.0-20210503060351-7fd8e65b6420
+# golang.org/x/net v0.0.0-20220526153639-5463443f8c37
 golang.org/x/net/context
 golang.org/x/net/context/ctxhttp
 golang.org/x/net/http/httpguts
@@ -166,16 +166,16 @@ golang.org/x/oauth2/google/internal/externalaccount
 golang.org/x/oauth2/internal
 golang.org/x/oauth2/jws
 golang.org/x/oauth2/jwt
-# golang.org/x/sys v0.0.0-20210616094352-59db8d763f22
+# golang.org/x/sys v0.0.0-20220520151302-bc2c85ada10a
 golang.org/x/sys/cpu
 golang.org/x/sys/execabs
 golang.org/x/sys/internal/unsafeheader
 golang.org/x/sys/plan9
 golang.org/x/sys/unix
 golang.org/x/sys/windows
-# golang.org/x/term v0.0.0-20201126162022-7de9c90e9dd1
+# golang.org/x/term v0.0.0-20210927222741-03fcf44c2211
 golang.org/x/term
-# golang.org/x/text v0.3.6
+# golang.org/x/text v0.3.7
 golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
