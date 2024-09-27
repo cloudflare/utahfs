@@ -162,6 +162,14 @@ func (c *Connection) Init() error {
 	// Tell the kernel not to use pitifully small 4 KiB writes.
 	initOp.Flags |= fusekernel.InitBigWrites
 
+	if c.cfg.EnableAsyncReads {
+		initOp.Flags |= fusekernel.InitAsyncRead
+	}
+
+	// kernel 4.20 increases the max from 32 -> 256
+	initOp.Flags |= fusekernel.InitMaxPages
+	initOp.MaxPages = 256
+
 	// Enable writeback caching if the user hasn't asked us not to.
 	if !c.cfg.DisableWritebackCaching {
 		initOp.Flags |= fusekernel.InitWritebackCache
@@ -330,7 +338,7 @@ func (c *Connection) readMessage() (*buffer.InMessage, error) {
 
 	// Loop past transient errors.
 	for {
-		// Attempt a reaed.
+		// Attempt a read.
 		err := m.Init(c.dev)
 
 		// Special cases:
@@ -397,7 +405,7 @@ func (c *Connection) ReadOp() (_ context.Context, op interface{}, _ error) {
 
 		// Convert the message to an op.
 		outMsg := c.getOutMessage()
-		op, err = convertInMessage(inMsg, outMsg, c.protocol)
+		op, err = convertInMessage(&c.cfg, inMsg, outMsg, c.protocol)
 		if err != nil {
 			c.putOutMessage(outMsg)
 			return nil, nil, fmt.Errorf("convertInMessage: %v", err)
@@ -502,10 +510,16 @@ func (c *Connection) Reply(ctx context.Context, opErr error) {
 	noResponse := c.kernelResponse(outMsg, inMsg.Header().Unique, op, opErr)
 
 	if !noResponse {
-		err := c.writeMessage(outMsg.Bytes())
-		if err != nil && c.errorLogger != nil {
-			c.errorLogger.Printf("writeMessage: %v %v", err, outMsg.Bytes())
+		var err error
+		if outMsg.Sglist != nil {
+			_, err = writev(int(c.dev.Fd()), outMsg.Sglist)
+		} else {
+			err = c.writeMessage(outMsg.OutHeaderBytes())
 		}
+		if err != nil && c.errorLogger != nil {
+			c.errorLogger.Printf("writeMessage: %v %v", err, outMsg.OutHeaderBytes())
+		}
+		outMsg.Sglist = nil
 	}
 }
 
